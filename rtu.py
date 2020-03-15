@@ -22,7 +22,6 @@ class RTU:
     @property
     def guid(self) -> int:
         return self.__guid
-
     @guid.setter
     def guid(self, new_guid: int):
         self.__guid = new_guid
@@ -30,7 +29,6 @@ class RTU:
     @property
     def rtutype(self) -> int:
         return self.__type
-
     @rtutype.setter
     def rtutype(self, new_type: int):
         self.__type = new_type
@@ -55,7 +53,6 @@ class Source(RTU):
     @property
     def voltage(self) -> float:
         return self.__voltage
-
     @voltage.setter
     def voltage(self, value: float):
         self.__voltage = value
@@ -85,6 +82,27 @@ class Transmission(RTU):
         self.__vout = None
         self.__amp = None
         self.__rload = None
+
+    @property
+    def state(self) -> float:
+        return self.__state
+    @state.setter
+    def state(self, value: float):
+        self.__state = value
+
+    @property
+    def left(self) -> float:
+        return self.__left
+    @left.setter
+    def left(self, value: float):
+        self.__left = value
+
+    @property
+    def right(self) -> float:
+        return self.__right
+    @right.setter
+    def right(self, value: float):
+        self.__right = value
 
     @property
     def load(self) -> float:
@@ -124,7 +142,7 @@ class Transmission(RTU):
     def calculate_load(self):
         self.__load = None
         for i in range(len(self.__loads)):
-            if (state & (2 ** i)) > 0:
+            if (self.__state & (2 ** i)) > 0:
                 if self.__loads[i] == 0:
                     self.__load = 0 # Failure
                     return
@@ -155,6 +173,13 @@ class Load(RTU):
     @left.setter
     def left(self, value: int):
         self.__left = value
+
+    @property
+    def vin(self) -> float:
+        return self.__vin
+    @vin.setter
+    def vin(self, value: float):
+        self.__vin = value
 
     def __str__(self):
         return 'Load RTU\r\n-------------------\r\nID: {0:14d}\r\nLoad: {1:9.2f}'.format(self.guid, self.__load)
