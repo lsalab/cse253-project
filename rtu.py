@@ -6,6 +6,10 @@ RTU_TYPES = [
     'LOAD'
 ]
 
+RTU_SOURCE = 0
+RTU_TRANSMISSION = 1
+RTU_LOAD = 2
+
 class RTU:
 
     def __init__(self, **kwargs):
@@ -57,26 +61,44 @@ class Source(RTU):
         self.__voltage = value
     
     def __str__(self):
-        return 'Source RTU\r\n----------------\r\nID: {0:11d}\r\nVout: {1:6.2f}'.format(self.__guid, self.__voltage)
+        return 'Source RTU\r\n----------------\r\nID: {0:11d}\r\nVout: {1:6.2f}'.format(self.guid, self.__voltage)
     
     def __repr__(self):
-        return 'Source RTU ({0:d}, {1:.2f})'.format(self.__guid, self.__voltage)
+        return 'Source RTU ({0:d}, {1:.2f})'.format(self.guid, self.__voltage)
 
 class Transmission(RTU):
 
     def __init__(self, **kwargs):
         super(Transmission, self).__init__(**kwargs)
-        if any(k not in kwargs.keys() for k in ['state', 'states', 'loads']):
+        if any(k not in kwargs.keys() for k in ['state', 'states', 'loads', 'left', 'right']):
             raise AttributeError()
-        if not isinstance(kwargs['state'], int) or any(not isinstance(kwargs[k], list) for k in ['states', 'loads']):
+        if any(not isinstance(kwargs[k], int) for k in ['state', 'left', 'right']) or any(not isinstance(kwargs[k], list) for k in ['states', 'loads']):
             raise AttributeError()
         self.__state = kwargs['state']
-        self.__states = kwargs['states']
         self.__loads = kwargs['loads']
+        self.__left = kwargs['left']
+        self.__right = kwargs['right']
         self.__load = None
         self.__vin = None
         self.__vout = None
         self.__amp = None
+
+    @property
+    def load(self) -> float:
+        return self.__load
+
+    @load.setter
+    def load(self, value: float):
+        self.__load = value
+
+    def calculate_load(self):
+        self.__load = -1
+        for i in range(len(self.__loads)):
+            if (state & (2 ** i)) > 0:
+                if self.__loads[i] == 0:
+                    self.__load = 0 # Failure
+                    return
+                self.__load = self.__loads[i] if self.__load == -1 else (self.__load * self.__loads[i]) / (self.__load + self.__loads[i])
 
 class Load(RTU):
 
@@ -95,8 +117,8 @@ class Load(RTU):
         self.__load = new_load
 
     def __str__(self):
-        return 'Load RTU\r\n-------------------\r\nID: {0:14d}\r\nLoad: {1:9.2f}'.format(self.__guid, self.__load)
+        return 'Load RTU\r\n-------------------\r\nID: {0:14d}\r\nLoad: {1:9.2f}'.format(self.guid, self.__load)
     
     def __repr__(self):
-        return 'Load RTU ({0:d}, {1:.2f})'.format(self.__guid, self.__load)
+        return 'Load RTU ({0:d}, {1:.2f})'.format(self.guid, self.__load)
 
