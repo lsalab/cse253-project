@@ -39,17 +39,24 @@ class IEC104():
 
 def get_command(pkt: APDU) -> dict:
 
-    ioa = pkt['IOA50'].IOA
+    if pkt.haslayer('IOA50'):
+        ioa = pkt['IOA50'].IOA
+        valor = pkt['IOA50'].Value
+    elif pkt.haslayer('IOA3'):
+        ioa = pkt['IOA3'].IOA
+        valor = pkt['DIQ'].DPI
+    elif pkt.haslayer('IOA36'):
+        ioa = pkt['IOA36'].IOA
+        valor = pkt['IOA36'].Value
     tx = pkt['APCI'].Apci['ApciTypeI'].Tx
     rx = pkt['APCI'].Apci['ApciTypeI'].Rx
-    valor = pkt['IOA50'].Value
     
     return {'ioa':ioa,
     'tx':tx,
     'rx':rx,
-    'valor':valor}
+    'value':valor}
 
-
+d
 
 if __name__ == '__main__':
 
