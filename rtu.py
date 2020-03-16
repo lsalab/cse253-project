@@ -106,12 +106,26 @@ class Source(RTU):
     @voltage.setter
     def voltage(self, value: float):
         self.__voltage = value
+        self.__ioaV = IEC104(36, 1001)
     
     def __str__(self):
         return 'Source RTU\r\n----------------\r\nID: {0:11d}\r\nVout: {1:6.2f}'.format(self.guid, self.__voltage)
     
     def __repr__(self):
         return 'Source RTU ({0:d}, {1:.2f})'.format(self.guid, self.__voltage)
+
+    
+    def subloop(self, wsock: socket.socket):
+
+        while not self.terminate:
+            if all(x is not None for x in [self.tx, self.rx]):
+                self.tx += 1
+                if self.tx == 65536:
+                    self.tx = 0
+                data = self.__ioaV.get_apdu(self.__voltage, self.tx, self.rx)
+                wsock.send(data)
+            sleep(1)
+        wsock.close()
 
 class Transmission(RTU):
 
@@ -238,7 +252,7 @@ class Transmission(RTU):
                 self.tx += 1
                 if self.tx == 65536:
                     self.tx = 0
-                data = self.__ioaI.get_apdu(self.__amp, self.tx, self.rx)
+                data = self.__ioaI.get_apdu((self.__vin - self.__vout)/self.__load, self.tx, self.rx)
                 wsock.send(data)
                 for i in self.__ioaBR.keys():
                     if self.tx == 65536:
@@ -257,7 +271,7 @@ class Transmission(RTU):
                 wsock, addr = self.socket.accept()
                 if not self.__confok or len(threads) == 0:
                     wsock.settimeout(0.25)
-                    t = Thread(target=subloop, kwargs={'wsock': wsock})
+                    t = Thread(target=self.subloop, kwargs={'wsock': wsock})
                     threads.append(t)
                     t.start()
                 else:
@@ -267,7 +281,6 @@ class Transmission(RTU):
         for t in threads:
             t.join()
         self.socket.close()
-
 
 class Load(RTU):
 
@@ -280,6 +293,9 @@ class Load(RTU):
         self.__load = kwargs['load']
         self.__left = kwargs['left']
         self.__vin = None
+        self.__amp = None
+        self.__ioaV = IEC104(36, 1001)
+        self.__ioaI = IEC104(36, 1002)
 
     @property
     def load(self) -> float:
@@ -307,4 +323,23 @@ class Load(RTU):
     
     def __repr__(self):
         return 'Load RTU ({0:d}, {1:.2f})'.format(self.guid, self.__load)
+
+    def subloop(self, wsock: socket.socket):
+
+        while not self.terminate:
+            if all(x is not None for x in [self.tx, self.rx]):
+                self.tx += 1
+                if self.tx == 65536:
+                    self.tx = 0
+                data = self.__ioaV.get_apdu(self.__vin, self.tx, self.rx)
+                wsock.send(data)
+                self.tx += 1
+                if self.tx == 65536:
+                    self.tx = 0
+                data = self.__ioaI.get_apdu(self.__vin/self.load, self.tx, self.rx)
+                wsock.send(data)
+            sleep(1)
+        wsock.close()
+    
+    
 
