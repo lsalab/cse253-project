@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+from iec104 import IEC104, get_command
+import socket
+from threading import Thread
+from time import sleep
+
 RTU_TYPES = [
     'SOURCE',
     'TRANSMISSION',
@@ -10,6 +15,15 @@ RTU_SOURCE = 0
 RTU_TRANSMISSION = 1
 RTU_LOAD = 2
 
+BREAKERS = {
+    101: 0x1, # 001
+    102: 0x2, # 010
+    103: 0x4  # 100
+}
+
+IEC104_PORT = 2404
+BUFFER_SIZE = 512
+
 class RTU:
 
     def __init__(self, **kwargs):
@@ -18,6 +32,11 @@ class RTU:
             raise AttributeError()
         self.__guid = kwargs['guid']
         self.__type = kwargs['type']
+        self.__terminate = False
+        self.__tx = None
+        self.__rx = None
+        self.__sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+        self.__sock.bind(('0.0.0.0', IEC104_PORT))
 
     @property
     def guid(self) -> int:
@@ -32,6 +51,37 @@ class RTU:
     @rtutype.setter
     def rtutype(self, new_type: int):
         self.__type = new_type
+
+    @property
+    def socket(self) -> socket.socket:
+        return self.__sock
+    @socket.setter
+    def socket(self, value: socket.socket):
+        self.__sock = value
+    
+    @property
+    def terminate(self) -> bool:
+        return self.__terminate
+    @terminate.setter
+    def terminate(self, value: bool):
+        self.__terminate = value
+
+    @property
+    def tx(self) -> int:
+        return self.__tx
+    @tx.setter
+    def tx(self, value: int):
+        self.__tx = value
+    
+    @property
+    def rx(self) -> int:
+        return self.__rx
+    @rx.setter
+    def rx(self, value: int):
+        self.__rx = value
+
+    # def get_pack(self, dato):
+
 
     def loop(self):
         'Override this'
@@ -67,21 +117,29 @@ class Transmission(RTU):
 
     def __init__(self, **kwargs):
         super(Transmission, self).__init__(**kwargs)
-        if any(k not in kwargs.keys() for k in ['state', 'loads', 'left', 'right']):
+        if any(k not in kwargs.keys() for k in ['state', 'loads', 'left', 'right', 'confok']):
             raise AttributeError()
         if any(not isinstance(kwargs[k], int) for k in ['state', 'left', 'right']) or not isinstance(kwargs['loads'], list):
             raise AttributeError()
         if any(not isinstance(k, float) for k in kwargs['loads']):
             raise AttributeError()
+        if not isinstance(kwargs['confok'], bool):
+            raise AttributeError()
         self.__state = kwargs['state']
         self.__loads = kwargs['loads']
         self.__left = kwargs['left']
         self.__right = kwargs['right']
+        self.__confok = kwargs['confok']
         self.__load = None
         self.__vin = None
         self.__vout = None
         self.__amp = None
         self.__rload = None
+        self.__ioaV = IEC104(36, 1001)
+        self.__ioaI = IEC104(36, 1002)
+        self.__ioaBR = {}
+        for i in BREAKERS.keys():
+            self.__ioaBR[i] = [ IEC104(3, i), IEC104(50, i) ]
 
     @property
     def state(self) -> float:
@@ -147,6 +205,69 @@ class Transmission(RTU):
                     self.__load = 0 # Failure
                     return
                 self.__load = self.__loads[i] if self.__load is None else (self.__load * self.__loads[i]) / (self.__load + self.__loads[i])
+
+    def receive_command(self, sock: socket.socket):
+        while not self.terminate:
+            try:
+                data = sock.recv(BUFFER_SIZE)
+                data = get_command(data)
+                self.tx = data['rx'] + 1
+                self.rx = data['tx'] + 1
+                if self.tx == 65536:
+                    self.tx = 0
+                if self.rx == 65536:
+                    self.rx = 0
+                sock.send(self.__ioaBR[data['ioa']][1].get_apdu(data['value'], data['rx'] + 1, data['tx'] + 1, 7))
+                if bool(data['value']):
+                    self.__state = self.__state | BREAKERS[data['ioa']] # STATE OR IOA
+                else: 
+                    self.__state = self.__state & (BREAKERS[data['ioa']] ^ 0x7) # STATE AND (IOA XOR 111)
+            except socket.timeout:
+                pass
+
+    def subloop(self, wsock: socket.socket):
+        cmd = Thread(target=self.receive_command, kwargs={'sock': wsock})
+        cmd.start()
+        while not self.terminate:
+            if all(x is not None for x in [self.tx, self.rx]):
+                self.tx += 1
+                if self.tx == 65536:
+                    self.tx = 0
+                data = self.__ioaV.get_apdu(self.__vin - self.__vout, self.tx, self.rx)
+                wsock.send(data)
+                self.tx += 1
+                if self.tx == 65536:
+                    self.tx = 0
+                data = self.__ioaI.get_apdu(self.__amp, self.tx, self.rx)
+                wsock.send(data)
+                for i in self.__ioaBR.keys():
+                    if self.tx == 65536:
+                        self.tx = 0
+                    data = self.__ioaBR[i][0].get_apdu((self.__state & BREAKERS[i]) / BREAKERS[i], self.tx, self.rx)
+                    wsock.send(data)
+            sleep(1)
+        cmd.join()
+        wsock.close()
+    
+    def loop(self):
+        self.socket.settimeout(0.25)
+        threads = []
+        while not self.terminate:
+            try:
+                wsock, addr = self.socket.accept()
+                if not self.__confok or len(threads) == 0:
+                    wsock.settimeout(0.25)
+                    t = Thread(target=subloop, kwargs={'wsock': wsock})
+                    threads.append(t)
+                    t.start()
+                else:
+                    wsock.close()
+            except socket.timeout:
+                pass
+        for t in threads:
+            t.join()
+        self.socket.close()
+
 
 class Load(RTU):
 
