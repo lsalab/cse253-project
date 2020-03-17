@@ -56,7 +56,7 @@ def get_command(pkt: APDU) -> dict:
     'rx':rx,
     'value':valor}
 
-d
+
 
 if __name__ == '__main__':
 

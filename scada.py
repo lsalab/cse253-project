@@ -11,7 +11,7 @@ from IEC104_Raw.dissector import APDU
 
 BUFFER_SIZE = 512
 IEC104_PORT = 2404
-IPv4_REGEX = re.compile(r'^(?:(?:2(?:5[0-5]|[0-4]\d)|1\d\d|[1-9]?\d)\.){3}(?:2(?:5[0-5]|[0-4]\d)|1\d\d|[1-9]?\d)(?:/\d\d)$', re.DOTALL | re.MULTILINE)
+IPv4_REGEX = re.compile(r'^(?:(?:2(?:5[0-5]|[0-4]\d)|1\d\d|[1-9]?\d)\.){3}(?:2(?:5[0-5]|[0-4]\d)|1\d\d|[1-9]?\d)(?:\/\d\d)?$', re.DOTALL | re.MULTILINE)
 
 IOAS = {
     1001: ['Voltage', 'V'],
@@ -43,7 +43,13 @@ class SCADACLI(Cmd):
                 data = get_command(APDU(data))
                 self.__rtu_data[k]['tx'] = data['rx']
                 self.__rtu_data[k]['rx'] = data['tx']
-                self.__rtu_data[k]['ioas'][data['ioa']] = data['value']
+                value = data['value']
+                if isinstance(value, str):
+                    if value == 'determined state OFF':
+                        value = 1
+                    else:
+                        value = 0
+                self.__rtu_data[k]['ioas'][data['ioa']] = value
             except socket.timeout:
                 pass
 
@@ -76,7 +82,7 @@ class SCADACLI(Cmd):
                 if IOAS[i][0] == 'Breaker':
                     breakers.append(str(i))
             ioa = int(runprompt(listq(message='Send command to which IOA?', choices=breakers)))
-            status = self.__rtu_data[rtuaddr]['ioas'][ioa]
+            status = int(self.__rtu_data[rtuaddr]['ioas'][ioa])
             if status == 0:
                 print('The last known state is OPEN')
                 ans = runprompt(listq(message='Would you like to CLOSE this IOA?', choices=['Yes', 'No']))
@@ -85,9 +91,9 @@ class SCADACLI(Cmd):
                 ans = runprompt(listq(message='Would you like to OPEN this IOA?', choices=['Yes', 'No']))
             if ans == 'Yes':
                 status = status ^ 0x1
-                self.__rtu_data[addr]['tx'] += 1
-                data = IEC104(50, ioa).get_apdu(status, self.__rtu_data[addr]['tx'], self.__rtu_data[addr]['rx'], 7)
-                self.__rtu_comms[addr].send(data)
+                self.__rtu_data[rtuaddr]['tx'] += 1
+                data = IEC104(50, ioa).get_apdu(status, self.__rtu_data[rtuaddr]['tx'], self.__rtu_data[rtuaddr]['rx'], 7)
+                self.__rtu_comms[rtuaddr].send(data)
         else:
             print('''Not connected to any RTUs''')
         return False
@@ -102,18 +108,19 @@ class SCADACLI(Cmd):
                 addr = arg
             else:
                 addr = runprompt(listq(message='Get the status of which RTU?', choices=self.__rtu_comms.keys()))
-            data = self.__rtu_data[addr]
+            data = self.__rtu_data[addr]['ioas']
             print('Current status of RTU %s:' % addr)
-            print('='*20)
-            for k, v in data:
+            print('='*40)
+            for k, v in data.items():
                 print('IOA %d:' % k)
                 print('-'*15)
                 print('Type: %s' % IOAS[k][0])
-                value = data['ioas'][k][1]
+                value = v
                 if IOAS[k][0] is not 'Breaker':
-                    print('Value: {0:5.2f} {1:s}'.format(value, IOAS[k][2]))
+                    print('Value: {0:5.2f} {1:s}'.format(value, IOAS[k][1]))
                 else:
                     value = 'OPEN' if value == 0 else 'CLOSED'
+                    print('Value: %s' % value)
         else:
             print('''Not connected to any RTUs''')
         return False

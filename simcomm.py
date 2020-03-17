@@ -2,6 +2,7 @@
 
 import sys
 import socket
+import random
 from time import sleep
 from struct import pack, unpack
 from threading import Thread
@@ -43,8 +44,8 @@ class SimulationHandler(Thread):
         self.__rtu = rtu
         self.__terminate = False
         self.__sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)      # Use UDP
-        # if sys.platform not in ['win32']:
-        #     self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)                   # Enable port reusage
+        if sys.platform not in ['win32']:
+            self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)                   # Enable port reusage
         self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)                       # Enable address reuse
         self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)                       # Enable broadcast
         self.__sock.bind(('', SIM_PORT))
@@ -63,14 +64,14 @@ class SimulationHandler(Thread):
         count = 0
         while not self.__terminate and self.__laddr is None:
             try:
-                if (count % 10) == 0:
-                    data = pack(DATA_FMT, self.__rtu.guid, self.__rtu.left, MSG_WERE, 0, 0, 0.0, 0.0)
-                    self.__sock.sendto(data, (SIM_BCAST, SIM_PORT))
+                # if (count % 10) == 0:
+                data = pack(DATA_FMT, self.__rtu.guid, self.__rtu.left, MSG_WERE, 0, 0, 0.0, 0.0)
+                self.__sock.sendto(data, (SIM_BCAST, SIM_PORT))
+                sleep(round(random.random(), 2))
                 data, addr = self.__sock.recvfrom(BUFFER_SIZE)
                 data = unpack(DATA_FMT, data)
-                if data[0] == self.__rtu.left and data[1] == self.__rtu.guid:
-                    if data[2] == MSG_ISAT:
-                        self.__laddr = addr
+                if data[0] == self.__rtu.left:
+                    self.__laddr = addr
                 elif data[2] == MSG_WERE and data[1] == self.__rtu.guid:
                     data = pack(DATA_FMT, self.__rtu.guid, data[0], MSG_ISAT, 0, 0, 0.0, 0.0)
                     self.__sock.sendto(data, addr)
@@ -82,14 +83,14 @@ class SimulationHandler(Thread):
         count = 0
         while not self.__terminate and self.__raddr is None:
             try:
-                if (count % 10) == 0:
-                    data = pack(DATA_FMT, self.__rtu.guid, self.__rtu.right, MSG_WERE, 0, 0, 0.0, 0.0)
-                    self.__sock.sendto(data, (SIM_BCAST, SIM_PORT))
+                # if (count % 10) == 0:
+                data = pack(DATA_FMT, self.__rtu.guid, self.__rtu.right, MSG_WERE, 0, 0, 0.0, 0.0)
+                self.__sock.sendto(data, (SIM_BCAST, SIM_PORT))
+                sleep(round(random.random(), 2))
                 data, addr = self.__sock.recvfrom(BUFFER_SIZE)
                 data = unpack(DATA_FMT, data)
-                if data[0] == self.__rtu.right and data[1] == self.__rtu.guid:
-                    if data[2] == MSG_ISAT:
-                        self.__raddr = addr
+                if data[0] == self.__rtu.right:
+                    self.__raddr = addr
                 elif data[2] == MSG_WERE and data[1] == self.__rtu.guid:
                     data = pack(DATA_FMT, self.__rtu.guid, data[0], MSG_ISAT, 0, 0, 0.0, 0.0)
                     self.__sock.sendto(data, addr)
@@ -138,11 +139,12 @@ class SimulationHandler(Thread):
                         data = pack(DATA_FMT, self.__rtu.guid, data[0], MSG_VOLT, 0, 0, self.__rtu.voltage, 0.0)
                     elif data[2] == MSG_UKWN:
                         data = None
-                        sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr))
+                        sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr[0]))
                         sys.stderr.flush()
                     else:
                         data = pack(DATA_FMT, self.__rtu.guid, data[0], MSG_UKWN, 0, 0, 0.0, 0.0)
-                    self.__sock.sendto(data, addr)
+                    if data is not None:
+                        self.__sock.sendto(data, addr)
             except socket.timeout:
                 pass
 
@@ -172,7 +174,7 @@ class SimulationHandler(Thread):
                         data = None
                     elif data[2] == MSG_UKWN:
                         data = None
-                        sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr))
+                        sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr[0]))
                         sys.stderr.flush()
                     else:
                         data = pack(DATA_FMT, self.__rtu.guid, data[0], MSG_UKWN, 0, 0, 0.0, 0.0)
@@ -201,7 +203,7 @@ class SimulationHandler(Thread):
                         data = None
                     elif data[2] == MSG_UKWN:
                         data = None
-                        sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr))
+                        sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr[0]))
                         sys.stderr.flush()
                     else:
                         data = pack(DATA_FMT, self.__rtu.guid, data[0], MSG_UKWN, 0, 0, 0.0, 0.0)

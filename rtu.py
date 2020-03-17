@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from IEC104_Raw.dissector import APDU
 from iec104 import IEC104, get_command
 import socket
 from threading import Thread
@@ -33,10 +34,11 @@ class RTU:
         self.__guid = kwargs['guid']
         self.__type = kwargs['type']
         self.__terminate = False
-        self.__tx = None
-        self.__rx = None
-        self.__sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-        self.__sock.bind(('0.0.0.0', IEC104_PORT))
+        self.__tx = 0
+        self.__rx = 0
+        self.__socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+        self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.__socket.bind(('0.0.0.0', IEC104_PORT))
 
     @property
     def guid(self) -> int:
@@ -53,11 +55,11 @@ class RTU:
         self.__type = new_type
 
     @property
-    def socket(self) -> socket.socket:
-        return self.__sock
-    @socket.setter
-    def socket(self, value: socket.socket):
-        self.__sock = value
+    def sock(self) -> socket.socket:
+        return self.__socket
+    @sock.setter
+    def sock(self, value: socket.socket):
+        self.__socket = value
     
     @property
     def terminate(self) -> bool:
@@ -99,6 +101,7 @@ class Source(RTU):
         if 'voltage' not in kwargs.keys() or not isinstance(kwargs['voltage'], float):
             raise AttributeError()
         self.__voltage = kwargs['voltage']
+        self.__confok = True
 
     @property
     def voltage(self) -> float:
@@ -116,7 +119,6 @@ class Source(RTU):
 
     
     def subloop(self, wsock: socket.socket):
-
         while not self.terminate:
             if all(x is not None for x in [self.tx, self.rx]):
                 self.tx += 1
@@ -126,6 +128,26 @@ class Source(RTU):
                 wsock.send(data)
             sleep(1)
         wsock.close()
+    
+    def loop(self):
+        self.sock.settimeout(0.25)
+        self.sock.listen(1)
+        threads = []
+        while not self.terminate:
+            try:
+                wsock, addr = self.sock.accept()
+                if not self.__confok or len(threads) == 0:
+                    wsock.settimeout(0.25)
+                    t = Thread(target=self.subloop, kwargs={'wsock': wsock})
+                    threads.append(t)
+                    t.start()
+                else:
+                    wsock.close()
+            except socket.timeout:
+                pass
+        for t in threads:
+            t.join()
+        self.sock.close()
 
 class Transmission(RTU):
 
@@ -223,7 +245,7 @@ class Transmission(RTU):
     def receive_command(self, sock: socket.socket):
         while not self.terminate:
             try:
-                data = sock.recv(BUFFER_SIZE)
+                data = APDU(sock.recv(BUFFER_SIZE))
                 data = get_command(data)
                 self.tx = data['rx'] + 1
                 self.rx = data['tx'] + 1
@@ -264,11 +286,12 @@ class Transmission(RTU):
         wsock.close()
     
     def loop(self):
-        self.socket.settimeout(0.25)
+        self.sock.settimeout(0.25)
+        self.sock.listen(1)
         threads = []
         while not self.terminate:
             try:
-                wsock, addr = self.socket.accept()
+                wsock, addr = self.sock.accept()
                 if not self.__confok or len(threads) == 0:
                     wsock.settimeout(0.25)
                     t = Thread(target=self.subloop, kwargs={'wsock': wsock})
@@ -280,7 +303,7 @@ class Transmission(RTU):
                 pass
         for t in threads:
             t.join()
-        self.socket.close()
+        self.sock.close()
 
 class Load(RTU):
 
@@ -292,6 +315,7 @@ class Load(RTU):
             raise AttributeError()
         self.__load = kwargs['load']
         self.__left = kwargs['left']
+        self.__confok = True
         self.__vin = None
         self.__amp = None
         self.__ioaV = IEC104(36, 1001)
@@ -325,7 +349,6 @@ class Load(RTU):
         return 'Load RTU ({0:d}, {1:.2f})'.format(self.guid, self.__load)
 
     def subloop(self, wsock: socket.socket):
-
         while not self.terminate:
             if all(x is not None for x in [self.tx, self.rx]):
                 self.tx += 1
@@ -340,6 +363,26 @@ class Load(RTU):
                 wsock.send(data)
             sleep(1)
         wsock.close()
+    
+    def loop(self):
+        self.sock.settimeout(0.25)
+        self.sock.listen(1)
+        threads = []
+        while not self.terminate:
+            try:
+                wsock, addr = self.sock.accept()
+                if not self.__confok or len(threads) == 0:
+                    wsock.settimeout(0.25)
+                    t = Thread(target=self.subloop, kwargs={'wsock': wsock})
+                    threads.append(t)
+                    t.start()
+                else:
+                    wsock.close()
+            except socket.timeout:
+                pass
+        for t in threads:
+            t.join()
+        self.sock.close()
     
     
 
