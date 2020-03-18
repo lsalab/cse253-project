@@ -1,5 +1,6 @@
 #!/usr/bin/env
 
+import sys
 from threading import Thread
 from time import sleep
 from rtu import Transmission, RTU_TRANSMISSION
@@ -7,13 +8,13 @@ from simcomm import SimulationHandler
 
 if __name__ == '__main__':
     srtu = Transmission(
-        guid=2,
+        guid=int(sys.argv[2]),
         type=RTU_TRANSMISSION,
         state=7,
-        loads = [12.0, 10.0, 13.0],
-        left=1,
-        right=3,
-        confok=True
+        loads = [0.394737, 0.394737, 0.394737],
+        left=int(sys.argv[3]),
+        right=int(sys.argv[4]),
+        confok=False
     )
     hrtu = SimulationHandler(srtu)
     mloop = Thread(target=srtu.loop)

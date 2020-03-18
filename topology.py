@@ -7,14 +7,13 @@ class MyTopo(Topo):
     def __init__(self):
         Topo.__init__(self)
 
-        rsrc = self.addHost('rsrc')
-        rtrx = self.addHost('rtx')
-        rlds = self.addHost('load')
-        scad = self.addHost('scada')
+        hosts = []
+        for i in range(8):
+            hosts.append(self.addHost('h' + str(i+1)))
 
         sw = self.addSwitch('s1')
 
-        for h in [rsrc, rtrx, rlds, scad]:
+        for h in hosts:
             self.addLink(h, sw)
 
 topos = { 'mytopo': (lambda: MyTopo()) }

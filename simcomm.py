@@ -116,11 +116,17 @@ class SimulationHandler(Thread):
             if self.__rtu.state != last_state:
                 self.__rtu.calculate_load()
                 last_state = self.__rtu.state
-            if all(x is not None for x in [self.__rtu.vin, self.__rtu.load, self.__rtu.rload]):
+            if self.__load == float('inf'):
+                self.__rtu.vout = 0
+                self.__rtu.amp = 0
+            elif all(x is not None for x in [self.__rtu.vin, self.__rtu.load, self.__rtu.rload]):
                 load = self.__rtu.load
                 vin = self.__rtu.vin
                 rload = self.__rtu.rload
-                self.__rtu.vout = vin  * rload / (rload + load)
+                if rload == float('inf'):
+                    self.__rtu.vout = vin
+                else:
+                    self.__rtu.vout = vin  * rload / (rload + load)
                 try:
                     self.__rtu.amp = vin / rload
                 except ZeroDivisionError:

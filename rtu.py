@@ -235,6 +235,9 @@ class Transmission(RTU):
 
     def calculate_load(self):
         self.__load = None
+        if self.__state == 0:
+            self.__load = float('inf')
+            return
         for i in range(len(self.__loads)):
             if (self.__state & (2 ** i)) > 0:
                 if self.__loads[i] == 0:

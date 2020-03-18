@@ -92,7 +92,7 @@ class SCADACLI(Cmd):
             if ans == 'Yes':
                 status = status ^ 0x1
                 self.__rtu_data[rtuaddr]['tx'] += 1
-                data = IEC104(50, ioa).get_apdu(status, self.__rtu_data[rtuaddr]['tx'], self.__rtu_data[rtuaddr]['rx'], 7)
+                data = IEC104(50, ioa).get_apdu(status, self.__rtu_data[rtuaddr]['tx'], self.__rtu_data[rtuaddr]['rx'], 1)
                 self.__rtu_comms[rtuaddr].send(data)
         else:
             print('''Not connected to any RTUs''')
@@ -117,7 +117,7 @@ class SCADACLI(Cmd):
                 print('Type: %s' % IOAS[k][0])
                 value = v
                 if IOAS[k][0] is not 'Breaker':
-                    print('Value: {0:5.2f} {1:s}'.format(value, IOAS[k][1]))
+                    print('Value: {0:5.12f} {1:s}'.format(value, IOAS[k][1]))
                 else:
                     value = 'OPEN' if value == 0 else 'CLOSED'
                     print('Value: %s' % value)
