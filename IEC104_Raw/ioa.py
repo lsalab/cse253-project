@@ -240,16 +240,29 @@ class CP56Time(Packet):
     ]
 
     def do_dissect(self, s):
-        self.MS = unpack('<H',s[0:2])[0]
-        self.Min = int(s[2] & 0x3f)
-        self.IV = IV[s[2] & 0x80]
-        self.Hour = int(s[3] & 0x1F)
-        self.SU = SU[s[3] & 0x80]
-        self.Day = int(s[4] & 0x1F)
-        self.DOW = DOW[s[4] & 0xE0]
-        self.Month = int(s[5] & 0x0F)
-        self.Year = int(s[6] & 0x7F)
-        return s[7:]
+        try:
+            self.MS = unpack('<H',s[0:2])[0]
+            self.Min = int(s[2] & 0x3f)
+            self.IV = int(s[2] & 0x80)
+            self.Hour = int(s[3] & 0x1F)
+            self.SU = int(s[3] & 0x80)
+            self.Day = int(s[4] & 0x1F)
+            self.DOW = int(s[4] & 0xE0)
+            self.Month = int(s[5] & 0x0F)
+            self.Year = int(s[6] & 0x7F)
+            return s[7:]
+        except IndexError:
+            self.MS = 0
+            self.Min = 0
+            self.IV = 0
+            self.Hour = 0
+            self.SU = 0
+            self.Day = 0
+            self.DOW = 0
+            self.Month = 0
+            self.Year = 0
+            return bytes(b'')
+        
     
     def do_build(self):
         s = list(range(7))

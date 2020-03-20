@@ -28,6 +28,7 @@ class SCADACLI(Cmd):
         self.prompt = 'SCADA>'
         self.__rtu_comms = {}
         self.__threads = {}
+        self.__killsignals = {}
         self.__rtu_data = {}
         self.__done  = False
     
@@ -37,7 +38,7 @@ class SCADACLI(Cmd):
     def handle_rtu(self, s: socket.socket, k: str):
         if k not in self.__rtu_data.keys():
             self.__rtu_data[k] = {'ioas': {}}
-        while not self.__done:
+        while not self.__done and not self.__killsignals[k]:
             try:
                 data = s.recv(BUFFER_SIZE)
                 data = get_command(APDU(data))
@@ -50,7 +51,7 @@ class SCADACLI(Cmd):
                     else:
                         value = 0
                 self.__rtu_data[k]['ioas'][data['ioa']] = value
-            except socket.timeout:
+            except (socket.timeout, KeyError, IndexError):
                 pass
 
     def do_connect(self, arg: str):
@@ -64,6 +65,7 @@ class SCADACLI(Cmd):
             s.settimeout(2)
             s.connect((arg, IEC104_PORT))
             self.__rtu_comms[arg] = s
+            self.__killsignals[arg] = False
             t = Thread(target=self.handle_rtu, kwargs={'s': s, 'k': arg})
             t.start()
             self.__threads[arg] = t
@@ -72,6 +74,20 @@ class SCADACLI(Cmd):
         except socket.timeout:
             print('Unable to connect to %s' % arg)
         return False
+    
+    def do_disconnect(self, arg:str):
+        'Disconnect from an RTU'
+        if len(self.__rtu_comms) > 0:
+            rtuaddr = runprompt(listq(message='Disconnect from which RTU?', choices=self.__rtu_comms.keys()))
+            self.__killsignals[rtuaddr] = True
+            t = self.__threads.pop(rtuaddr)
+            t.join()
+            s = self.__rtu_comms.pop(rtuaddr)
+            d = self.__rtu_data.pop(rtuaddr)
+            k = self.__killsignals.pop(rtuaddr)
+            s.close()
+        else:
+            print('Not connected to any RTUs')
 
     def do_send(self, arg):
         'Send a command to an RTU'
@@ -81,19 +97,22 @@ class SCADACLI(Cmd):
             for i in self.__rtu_data[rtuaddr]['ioas'].keys():
                 if IOAS[i][0] == 'Breaker':
                     breakers.append(str(i))
-            ioa = int(runprompt(listq(message='Send command to which IOA?', choices=breakers)))
-            status = int(self.__rtu_data[rtuaddr]['ioas'][ioa])
-            if status == 0:
-                print('The last known state is OPEN')
-                ans = runprompt(listq(message='Would you like to CLOSE this IOA?', choices=['Yes', 'No']))
+            if len(breakers) > 0:
+                ioa = int(runprompt(listq(message='Send command to which IOA?', choices=breakers)))
+                status = int(self.__rtu_data[rtuaddr]['ioas'][ioa])
+                if status == 0:
+                    print('The last known state is OPEN')
+                    ans = runprompt(listq(message='Would you like to CLOSE this IOA?', choices=['Yes', 'No']))
+                else:
+                    print('The last known state is CLOSE')
+                    ans = runprompt(listq(message='Would you like to OPEN this IOA?', choices=['Yes', 'No']))
+                if ans == 'Yes':
+                    status = status ^ 0x1
+                    self.__rtu_data[rtuaddr]['tx'] += 1
+                    data = IEC104(50, ioa).get_apdu(status, self.__rtu_data[rtuaddr]['tx'], self.__rtu_data[rtuaddr]['rx'], 1)
+                    self.__rtu_comms[rtuaddr].send(data)
             else:
-                print('The last known state is CLOSE')
-                ans = runprompt(listq(message='Would you like to OPEN this IOA?', choices=['Yes', 'No']))
-            if ans == 'Yes':
-                status = status ^ 0x1
-                self.__rtu_data[rtuaddr]['tx'] += 1
-                data = IEC104(50, ioa).get_apdu(status, self.__rtu_data[rtuaddr]['tx'], self.__rtu_data[rtuaddr]['rx'], 1)
-                self.__rtu_comms[rtuaddr].send(data)
+                print('This RTU cannot receive any commands')
         else:
             print('''Not connected to any RTUs''')
         return False
@@ -109,7 +128,7 @@ class SCADACLI(Cmd):
             else:
                 addr = runprompt(listq(message='Get the status of which RTU?', choices=self.__rtu_comms.keys()))
             data = self.__rtu_data[addr]['ioas']
-            print('Current status of RTU %s:' % addr)
+            print('\r\nCurrent status of RTU %s:' % addr)
             print('='*40)
             for k, v in data.items():
                 print('IOA %d:' % k)
@@ -121,6 +140,7 @@ class SCADACLI(Cmd):
                 else:
                     value = 'OPEN' if value == 0 else 'CLOSED'
                     print('Value: %s' % value)
+            print('='*40 + '\r\n')
         else:
             print('''Not connected to any RTUs''')
         return False

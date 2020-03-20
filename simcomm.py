@@ -116,7 +116,7 @@ class SimulationHandler(Thread):
             if self.__rtu.state != last_state:
                 self.__rtu.calculate_load()
                 last_state = self.__rtu.state
-            if self.__load == float('inf'):
+            if self.__rtu.load == float('inf'):
                 self.__rtu.vout = 0
                 self.__rtu.amp = 0
             elif all(x is not None for x in [self.__rtu.vin, self.__rtu.load, self.__rtu.rload]):
@@ -145,7 +145,7 @@ class SimulationHandler(Thread):
                         data = pack(DATA_FMT, self.__rtu.guid, data[0], MSG_VOLT, 0, 0, self.__rtu.voltage, 0.0)
                     elif data[2] == MSG_UKWN:
                         data = None
-                        sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr[0]))
+                        # sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr[0]))
                         sys.stderr.flush()
                     else:
                         data = pack(DATA_FMT, self.__rtu.guid, data[0], MSG_UKWN, 0, 0, 0.0, 0.0)
@@ -180,7 +180,7 @@ class SimulationHandler(Thread):
                         data = None
                     elif data[2] == MSG_UKWN:
                         data = None
-                        sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr[0]))
+                        # sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr[0]))
                         sys.stderr.flush()
                     else:
                         data = pack(DATA_FMT, self.__rtu.guid, data[0], MSG_UKWN, 0, 0, 0.0, 0.0)
@@ -209,7 +209,7 @@ class SimulationHandler(Thread):
                         data = None
                     elif data[2] == MSG_UKWN:
                         data = None
-                        sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr[0]))
+                        # sys.stderr.write('Received MSG_UKWN from {:s}\r\n'.format(addr[0]))
                         sys.stderr.flush()
                     else:
                         data = pack(DATA_FMT, self.__rtu.guid, data[0], MSG_UKWN, 0, 0, 0.0, 0.0)

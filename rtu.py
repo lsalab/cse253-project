@@ -3,6 +3,7 @@
 from IEC104_Raw.dissector import APDU
 from iec104 import IEC104, get_command
 import socket
+import errno
 from threading import Thread
 from time import sleep
 
@@ -101,7 +102,8 @@ class Source(RTU):
         if 'voltage' not in kwargs.keys() or not isinstance(kwargs['voltage'], float):
             raise AttributeError()
         self.__voltage = kwargs['voltage']
-        self.__confok = True
+        self.__ioaV = IEC104(36, 1001)
+        self.__confok = False
 
     @property
     def voltage(self) -> float:
@@ -125,13 +127,20 @@ class Source(RTU):
                 if self.tx == 65536:
                     self.tx = 0
                 data = self.__ioaV.get_apdu(self.__voltage, self.tx, self.rx)
-                wsock.send(data)
+                try:
+                    wsock.send(data)
+                except BrokenPipeError:
+                    break
+                except socket.error as e:
+                    if e.errno != errno.ECONNRESET:
+                        raise
+                    break
             sleep(1)
         wsock.close()
     
     def loop(self):
         self.sock.settimeout(0.25)
-        self.sock.listen(1)
+        self.sock.listen()
         threads = []
         while not self.terminate:
             try:
@@ -250,47 +259,61 @@ class Transmission(RTU):
             try:
                 data = APDU(sock.recv(BUFFER_SIZE))
                 data = get_command(data)
-                self.tx = data['rx'] + 1
-                self.rx = data['tx'] + 1
-                if self.tx == 65536:
-                    self.tx = 0
-                if self.rx == 65536:
-                    self.rx = 0
-                sock.send(self.__ioaBR[data['ioa']][1].get_apdu(data['value'], data['rx'] + 1, data['tx'] + 1, 7))
-                if bool(data['value']):
-                    self.__state = self.__state | BREAKERS[data['ioa']] # STATE OR IOA
-                else: 
-                    self.__state = self.__state & (BREAKERS[data['ioa']] ^ 0x7) # STATE AND (IOA XOR 111)
+                if data['ioa'] in self.__ioaBR.keys():
+                    self.tx = data['rx'] + 1
+                    self.rx = data['tx'] + 1
+                    if self.tx == 65536:
+                        self.tx = 0
+                    if self.rx == 65536:
+                        self.rx = 0
+                    sock.send(self.__ioaBR[data['ioa']][1].get_apdu(data['value'], data['rx'] + 1, data['tx'] + 1, 7))
+                    if bool(data['value']):
+                        self.__state = self.__state | BREAKERS[data['ioa']] # STATE OR IOA
+                    else: 
+                        self.__state = self.__state & (BREAKERS[data['ioa']] ^ 0x7) # STATE AND (IOA XOR 111)
             except socket.timeout:
                 pass
+            except BrokenPipeError:
+                break
+            except socket.error as e:
+                if e.errno != errno.ECONNRESET:
+                    raise
+                break
 
     def subloop(self, wsock: socket.socket):
         cmd = Thread(target=self.receive_command, kwargs={'sock': wsock})
         cmd.start()
         while not self.terminate:
-            if all(x is not None for x in [self.tx, self.rx]):
-                self.tx += 1
-                if self.tx == 65536:
-                    self.tx = 0
-                data = self.__ioaV.get_apdu(self.__vin - self.__vout, self.tx, self.rx)
-                wsock.send(data)
-                self.tx += 1
-                if self.tx == 65536:
-                    self.tx = 0
-                data = self.__ioaI.get_apdu((self.__vin - self.__vout)/self.__load, self.tx, self.rx)
-                wsock.send(data)
-                for i in self.__ioaBR.keys():
+            try:
+                if all(x is not None for x in [self.tx, self.rx]):
+                    self.tx += 1
                     if self.tx == 65536:
                         self.tx = 0
-                    data = self.__ioaBR[i][0].get_apdu((self.__state & BREAKERS[i]) / BREAKERS[i], self.tx, self.rx)
+                    data = self.__ioaV.get_apdu(self.__vin - self.__vout, self.tx, self.rx)
                     wsock.send(data)
-            sleep(1)
+                    self.tx += 1
+                    if self.tx == 65536:
+                        self.tx = 0
+                    data = self.__ioaI.get_apdu((self.__vin - self.__vout)/self.__load, self.tx, self.rx)
+                    wsock.send(data)
+                    for i in self.__ioaBR.keys():
+                        if self.tx == 65536:
+                            self.tx = 0
+                        data = self.__ioaBR[i][0].get_apdu((self.__state & BREAKERS[i]) / BREAKERS[i], self.tx, self.rx)
+                        wsock.send(data)
+                sleep(1)
+            except BrokenPipeError:
+                break
+            except socket.error as e:
+                if e.errno != errno.ECONNRESET:
+                    raise
+                break
         cmd.join()
         wsock.close()
     
     def loop(self):
         self.sock.settimeout(0.25)
-        self.sock.listen(1)
+        self.sock.listen()
         threads = []
         while not self.terminate:
             try:
@@ -318,7 +341,7 @@ class Load(RTU):
             raise AttributeError()
         self.__load = kwargs['load']
         self.__left = kwargs['left']
-        self.__confok = True
+        self.__confok = False
         self.__vin = None
         self.__amp = None
         self.__ioaV = IEC104(36, 1001)
@@ -352,24 +375,32 @@ class Load(RTU):
         return 'Load RTU ({0:d}, {1:.2f})'.format(self.guid, self.__load)
 
     def subloop(self, wsock: socket.socket):
-        while not self.terminate:
-            if all(x is not None for x in [self.tx, self.rx]):
-                self.tx += 1
-                if self.tx == 65536:
-                    self.tx = 0
-                data = self.__ioaV.get_apdu(self.__vin, self.tx, self.rx)
-                wsock.send(data)
-                self.tx += 1
-                if self.tx == 65536:
-                    self.tx = 0
-                data = self.__ioaI.get_apdu(self.__vin/self.load, self.tx, self.rx)
-                wsock.send(data)
-            sleep(1)
+        connalive = True
+        while not self.terminate and connalive:
+            try:
+                if all(x is not None for x in [self.tx, self.rx]):
+                    self.tx += 1
+                    if self.tx == 65536:
+                        self.tx = 0
+                    data = self.__ioaV.get_apdu(self.__vin, self.tx, self.rx)
+                    wsock.send(data)
+                    self.tx += 1
+                    if self.tx == 65536:
+                        self.tx = 0
+                    data = self.__ioaI.get_apdu(self.__vin/self.load, self.tx, self.rx)
+                    wsock.send(data)
+                sleep(1)
+            except BrokenPipeError:
+                connalive = False
+            except socket.error as e:
+                if e.errno != errno.ECONNRESET:
+                    raise
+                connalive = False
         wsock.close()
     
     def loop(self):
         self.sock.settimeout(0.25)
-        self.sock.listen(1)
+        self.sock.listen()
         threads = []
         while not self.terminate:
             try:

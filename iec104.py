@@ -55,8 +55,18 @@ def get_command(pkt: APDU) -> dict:
     elif pkt.haslayer('IOA36'):
         ioa = pkt['IOA36'].IOA
         valor = pkt['IOA36'].Value
-    tx = pkt['APCI'].Apci['ApciTypeI'].Tx
-    rx = pkt['APCI'].Apci['ApciTypeI'].Rx
+    elif pkt.haslayer('IOA'):
+        ioa = pkt['IOA'].IOA
+        valor = pkt['IOA'].Value
+    else:
+        ioa = 0
+        valor = -1
+    if pkt.haslayer('APCI'):
+        tx = pkt['APCI'].Apci['ApciTypeI'].Tx
+        rx = pkt['APCI'].Apci['ApciTypeI'].Rx
+    else:
+        tx = 0
+        rx = 0
     
     return {'ioa':ioa,
     'tx':tx,
