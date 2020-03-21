@@ -14,3 +14,5 @@ clustering.py
 - KMeans, DBSCAN 
 - Component analysis
 - visualization in PCA
+
+#### Parsing and computation from raw capture utilize another Java project, which is not included here. That project is involved in a research paper to be submitted. 
