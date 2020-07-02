@@ -8,13 +8,17 @@ from struct import pack, unpack
 from threading import Thread
 from rtu import RTU_SOURCE, RTU_TRANSMISSION, RTU_LOAD, RTU_TYPES
 
+if sys.platform[:3] == 'win':
+    print('Intended to be executed in a mininet Linux environment.')
+    raise RuntimeError()
+
 try:
     from pyroute2 import IPDB
 except ImportError:
     print('Dependency missing: pip install pyroute2')
     sys.exit(1)
 ip = IPDB()
-SIM_BCAST = ip.interfaces[sys.argv[1]].ipaddr[0]['broadcast']
+SIM_BCAST = ip.interfaces[[x for x in ip.interfaces if ip.interfaces[x]['state'] == 'up' and isinstance(x, str) and str(x) != 'lo'][0]].ipaddr[0]['broadcast']
 ip.release()
 del ip
 
@@ -45,7 +49,7 @@ class SimulationHandler(Thread):
         self.__terminate = False
         self.__sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)      # Use UDP
         if sys.platform not in ['win32']:
-            self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)                   # Enable port reusage
+            self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)                   # Enable port reusage pylint: disable=no-member
         self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)                       # Enable address reuse
         self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)                       # Enable broadcast
         self.__sock.bind(('', SIM_PORT))

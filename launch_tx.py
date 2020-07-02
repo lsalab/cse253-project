@@ -1,22 +1,33 @@
 #!/usr/bin/env
 
 import sys
+import signal
 from threading import Thread
 from time import sleep
 from rtu import Transmission, RTU_TRANSMISSION
 from simcomm import SimulationHandler
 
 if __name__ == '__main__':
+    if sys.platform[:3] == 'win':
+        print('Intended to be executed in a mininet Linux environment.')
+        sys.exit()
     srtu = Transmission(
-        guid=int(sys.argv[2]),
+        guid=int(sys.argv[1]),
         type=RTU_TRANSMISSION,
         state=7,
         loads = [0.394737, 0.394737, 0.394737],
-        left=int(sys.argv[3]),
-        right=int(sys.argv[4]),
+        left=int(sys.argv[2]),
+        right=int(sys.argv[3]),
         confok=False
     )
     hrtu = SimulationHandler(srtu)
+    def catch_sigterm():
+        global hrtu
+        global srtu
+        hrtu.terminate = True
+        srtu.terminate = True
+    signal.signal(signal.SIGINT, catch_sigterm)
+    signal.signal(signal.SIGTERM, catch_sigterm)
     mloop = Thread(target=srtu.loop)
     mloop.start()
     hrtu.start()
