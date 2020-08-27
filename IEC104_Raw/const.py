@@ -13,6 +13,7 @@ TYPEID_ASDU = {
     0x01: 'M_SP_NA_1 (1)',
     0x07: 'M_BO_NA_1 (7)',
     0x2E: 'C_DC_NA_1 (46)',
+    0x2D: 'C_SC_NA_1 (45)',
 }
 
 TYPE_APCI = {
