@@ -173,3 +173,18 @@ I = {
     0x00: 'initialization with unchanged local parameters',
     0x80: 'initialization after change of local parameters'
 }
+
+QU = {
+    0x00: 'no pulse defined',
+    0x01: 'short pulse duration (circuit-breaker)',
+    0x02: 'long pulse duration',
+    0x03: 'persistent output',
+    0x04: 'reserved',
+    0x05: 'reserved',
+    0x06: 'reserved',
+}
+
+SCS = {
+    0x00: 'OFF',
+    0x01: 'ON'
+}

@@ -3,7 +3,7 @@
 from struct import unpack
 from scapy.fields import PacketField, ShortField
 from .fields import IOAID, LEFloatField, ByteField, SignedShortField
-from .const import OV, BL, SB, NT, IV, SU, DOW, SE, DPI, TRANSIENT, QOi, SPI, R, I
+from .const import OV, BL, SB, NT, IV, SU, DOW, SE, DPI, TRANSIENT, QOi, SPI, R, I, QU
 from scapy.packet import Packet
 
 class BSI(Packet):
@@ -282,6 +282,34 @@ class CP56Time(Packet):
     def extract_padding(self, s):
         return '', s
 
+class SCO(Packet):
+    name = 'SCO'
+    fields_desc = [
+        ByteField('SCS',False),
+        ByteField('QU',None),
+        ByteField('SE',None)
+    ]
+
+    def do_dissect(self, s):
+        self.SCS = s[0] & 0x01
+        self.QU = QU[s[0] & 0x7C]
+        self.SE = SE[s[0] & 0x80]
+
+        return s[1:]
+
+    def do_build(self):
+        s = list(range(1))
+        s[0] = (self.SE << 7 &  0x80) | (self.SCS & 0x01) | (self.QU << 6 & 0x7C)
+
+        return s
+
+    def __bytes__(self):
+        return bytes(self.build())
+    
+    def extract_padding(self, s):
+        return '', s
+
+
 class IOA36(Packet):
 
     name = 'IOA'
@@ -291,19 +319,6 @@ class IOA36(Packet):
         PacketField('QDS', None, QDS),
         PacketField('CP56Time', None, CP56Time),
     ]
-
-    # def do_build(self):
-
-    #     s = list(range(15))
-    #     # s[0] = (self.IOA & 0xFF)
-    #     # s[1] = (self.IOA >> 7)
-    #     s[0] = (self.IOA >> 7)
-    #     s[1] = (self.IOA & 0xFF)
-
-    #     return s
-
-    # def __bytes__(self):
-    #     return bytes(self.build())
 
     def extract_padding(self, s):
         return '', s
@@ -435,6 +450,16 @@ class IOA7(Packet):
     def extract_padding(self, s):
         return '', s
 
+class IOA45(Packet):
+    name = 'IOA'
+    fields_desc = [
+        IOAID('IOA', None),
+        PacketField('SCO', None, SCO)
+    ]
+
+    def extract_padding(self, s):
+        return '', s
+
 IOAS = {
     36: IOA36,
     13: IOA13,
@@ -449,6 +474,7 @@ IOAS = {
     31: IOA31,
     1: IOA1,
     7: IOA7,
+    45: IOA45,
 }
 
 IOALEN = {
@@ -467,4 +493,5 @@ IOALEN = {
     31: 11,
     1: 4,
     7: 8,
+    45: 4,
 }
