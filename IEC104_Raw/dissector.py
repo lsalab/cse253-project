@@ -3,7 +3,7 @@
 from struct import unpack, pack
 from scapy.packet import Raw, bind_layers, Padding, Packet, conf
 from scapy.layers.inet import TCP
-from scapy.fields import XByteField, ByteField, PacketListField, ByteEnumField, PacketField
+from scapy.fields import XByteField, ByteField, ShortField, PacketListField, ByteEnumField, PacketField, ConditionalField
 from .subPackets import ApciType
 from .ioa import IOAS, IOALEN
 from .const import SQ, CAUSE_OF_TX, TYPEID_ASDU
@@ -100,13 +100,57 @@ class ASDU(Packet):
 
 class APCI(Packet):
 
-    name = 'IEC 60870-5-104-Apci'
+    name = 'IEC 60870-5-104-APCI'
 
     fields_desc = [
         XByteField('START',0x68),
         ByteField('ApduLen',4),
-        ApciType('Apci', None),
+        XByteField('Type', 0x00),
+        ConditionalField(XByteField('UType', 0x01), lambda pkt: pkt.Type == 0x03),
+        ConditionalField(ShortField('Tx', 0x00), lambda pkt: pkt.Type == 0x00),
+        ConditionalField(ShortField('Rx', 0x00), lambda pkt: pkt.Type < 3),
     ]
+
+    def do_dissect(self, s):
+        self.START = s[0]
+        self.ApduLen = s[1]
+        self.Type = s[2] & 0x03
+        if self.Type == 3:
+            self.UType = (s[2] & 0xfc) >> 2
+        else:
+            if self.Type == 0:
+                self.Tx = (s[3] << 7) | (s[2] >> 1)
+            self.Rx = (s[5] << 7) | (s[4] >> 1)
+        return s[6:]
+
+    def dissect(self, s):
+        s = self.pre_dissect(s)
+        s = self.do_dissect(s)
+        s = self.post_dissect(s)
+        payl,pad = self.extract_padding(s)
+        self.do_dissect_payload(payl)
+        if pad and conf.padding:
+            self.add_payload(Padding(pad))
+
+    def do_build(self):
+        s = list(range(6))
+        s[0] = 0x68
+        s[1] = self.ApduLen
+        if self.Type == 0x03:
+            s[2] = ((self.UType << 2) & 0xfc) | self.Type 
+            s[3] = 0
+            s[4] = 0
+            s[5] = 0
+        else:
+            if self.Type == 0x00:
+                s[2] = ((self.Tx << 1) & 0x00fe) | self.Type
+                s[3] = ((self.Tx << 1) & 0xff00) >> 8
+            else:
+                s[2] = self.Type
+                s[3] = 0
+            s[4] = (self.Rx << 1) & 0x00fe
+            s[5] = (self.Rx & 0xff00) >> 8
+        return s
 
     def extract_padding(self, s):
         return None, s

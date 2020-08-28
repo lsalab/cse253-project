@@ -70,15 +70,13 @@ class ApciTypeS(Packet):
 class ApciTypeU(Packet):
     name = 'APCI Type U'
     fields_desc = [
-        StrField('Type', None),
-        StrField('UType', None)
+        XByteField('Type', None),
+        XByteField('UType', None)
     ]
 
     def do_dissect(self, s):
-        flags_Type = s[0] & 0x03
-        self.Type = TYPE_APCI[flags_Type]
-        flags_UType = s[0] & 0xfc
-        self.UType = UNNUMBERED_CONTROL_FIELD[flags_UType]
+        self.Type = s[0] & 0x03
+        self.UType = (s[0] & 0xfc) >> 2
         return s[4:]
 
     def dissect(self, s):
@@ -92,7 +90,7 @@ class ApciTypeU(Packet):
 
     def do_build(self):
         s = list(range(4))
-        s[0] = self.UType | 0x03 
+        s[0] = ((self.UType << 2) & 0xfc) | self.Type 
         s[1] = 0
         s[2] = 0
         s[3] = 0
