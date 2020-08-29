@@ -2,11 +2,11 @@
 
 from struct import unpack, pack
 from scapy.packet import Raw, bind_layers, Padding, Packet, conf
-from scapy.layers.inet import TCP
+from scapy.layers.inet import TCP, Ether
 from scapy.fields import XByteField, ByteField, ShortField, PacketListField, ByteEnumField, PacketField, ConditionalField
 from .subPackets import ApciType
 from .ioa import IOAS, IOALEN
-from .const import SQ, CAUSE_OF_TX, TYPEID_ASDU
+from .const import TYPE_APCI, SQ, CAUSE_OF_TX, TYPEID_ASDU
 from scapy.all import conf
 
 class ASDU(Packet):
@@ -93,7 +93,7 @@ class ASDU(Packet):
             for i in self.IOA:
                 s += i.do_build()
         
-        return s
+        return bytes(s)
 
     def __bytes__(self):
         return bytes(self.build())
@@ -103,9 +103,9 @@ class APCI(Packet):
     name = 'IEC 60870-5-104-APCI'
 
     fields_desc = [
-        XByteField('START',0x68),
-        ByteField('ApduLen',4),
-        XByteField('Type', 0x00),
+        XByteField('START', 0x68),
+        ByteField('ApduLen', 4),
+        ByteEnumField('Type', 0x00, TYPE_APCI),
         ConditionalField(XByteField('UType', 0x01), lambda pkt: pkt.Type == 0x03),
         ConditionalField(ShortField('Tx', 0x00), lambda pkt: pkt.Type == 0x00),
         ConditionalField(ShortField('Rx', 0x00), lambda pkt: pkt.Type < 3),
@@ -114,7 +114,7 @@ class APCI(Packet):
     def do_dissect(self, s):
         self.START = s[0]
         self.ApduLen = s[1]
-        self.Type = s[2] & 0x03
+        self.Type = s[2] & 0x03 if bool(s[2] & 0x01) else 0x00
         if self.Type == 3:
             self.UType = (s[2] & 0xfc) >> 2
         else:
@@ -127,7 +127,7 @@ class APCI(Packet):
         s = self.pre_dissect(s)
         s = self.do_dissect(s)
         s = self.post_dissect(s)
-        payl,pad = self.extract_padding(s)
+        payl, pad = self.extract_padding(s)
         self.do_dissect_payload(payl)
         if pad and conf.padding:
             self.add_payload(Padding(pad))
@@ -150,32 +150,50 @@ class APCI(Packet):
                 s[3] = 0
             s[4] = (self.Rx << 1) & 0x00fe
             s[5] = (self.Rx & 0xff00) >> 8
-        return s
+        return bytes(s)
 
     def extract_padding(self, s):
+        if self.Type == 0x00 and self.ApduLen > 4:
+            return s[:self.ApduLen - 4], s[self.ApduLen - 4:]
         return None, s
+    
+    def do_dissect_payload(self, s):
+        if s is not None:
+            p = ASDU(s, _internal=1, _underlayer=self)
+            self.add_payload(p)
 
 class APDU(Packet):
     name = 'APDU'
-    fields_desc = [
-        PacketField('APCI', None, APCI),
-        PacketField('ASDU', None, ASDU)
-    ]
 
     def dissect(self, s):
         s = self.pre_dissect(s)
         s = self.do_dissect(s)
         s = self.post_dissect(s)
-        payl,pad = self.extract_padding(s) 
+        payl, pad = self.extract_padding(s) 
         self.do_dissect_payload(payl)
         if pad and conf.padding:
             if pad[0] in [0x68]: #TODO: [Luis] "self.underlayer is not None"
-                self.add_payload(APDU(pad))
+                self.add_payload(APDU(pad, _internal=1, _underlayer=self))
             else:
                 self.add_payload(Padding(pad))
+    
+    def do_dissect(self, s):
+        apci = APCI(s, _internal=1, _underlayer=self)
+        self.add_payload(apci)
 
     def extract_padding(self, s):
-        return '', s
+        return None, s
 
 bind_layers(TCP, APDU, sport=2404)
 bind_layers(TCP, APDU, dport=2404)
+
+if __name__ == '__main__':
+    from binascii import hexlify, unhexlify
+    print('Dissecting "68040e001e00" ...\r\n')
+    data = unhexlify('68040e001e00')
+    APDU(data).show()
+    print('\r\nBuilding "68040e001e00"...\r\n')
+    pkt = APDU()/APCI(ApduLen=4, Type=0x00, Tx=7, Rx=15)
+    a = pkt.build()
+    pkt.show()
+    print('Result:', hexlify(a))
