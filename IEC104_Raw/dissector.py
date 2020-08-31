@@ -4,14 +4,13 @@ from struct import unpack, pack
 from scapy.packet import Raw, bind_layers, Padding, Packet, conf
 from scapy.layers.inet import TCP, Ether
 from scapy.fields import XByteField, ByteField, ShortField, PacketListField, ByteEnumField, PacketField, ConditionalField
-from .subPackets import ApciType
 from .ioa import IOAS, IOALEN
 from .const import TYPE_APCI, SQ, CAUSE_OF_TX, TYPEID_ASDU
 from scapy.all import conf
 
 class ASDU(Packet):
 
-    name = 'IEC 60870-5-104-Asdu'
+    name = 'IEC 60870-5-104-ASDU'
     fields_desc = [
         ByteField('TypeId',None),
         ByteField('SQ',None),

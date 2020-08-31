@@ -74,34 +74,32 @@ CAUSE_OF_TX = {
     47: 'unknown information object address'
 }
 
+QDS_FLAGS = {
+    1: 'Overflow',
+    5: 'Blocked',
+    6: 'Substituted',
+    7: 'Not topical',
+    8: 'Invalid'
+}
+
+DIQ_FLAGS = {
+    5: 'Blocked',
+    6: 'Substituted',
+    7: 'Not topical',
+    8: 'Invalid'
+}
+
+SIQ_FLAGS = {
+    1: 'SPI',
+    5: 'Blocked',
+    6: 'Subsituted',
+    7: 'Not topical',
+    8: 'Invalid'
+}
+
 SQ = {
     0X00: False,
     0x80: True
-}
-
-OV = {
-    0X00: 'no overflow',
-    0x01: 'overflow'
-}
-
-BL = {
-    0X00: 'not blocked',
-    0x10: 'blocked'
-}
-
-SB = {
-    0X00: 'not substituted',
-    0x20: 'substituted'
-}
-
-NT = {
-    0X00: 'topical',
-    0x40: 'not topical'
-}
-
-IV = {
-    0X00: 'valid',
-    0x80: 'invalid'
 }
 
 SU = {
@@ -121,16 +119,16 @@ DOW = {
     0xE0: 'sunday'
 }
 
-SE = {
-    0x00: 'execute',
-    0x80: 'select'
+SEL_EXEC = {
+    0x00: 'Execute',
+    0x80: 'Select'
 }
 
-DPI = {
-    0x00: 'indeterminate or intermediate state',
-    0x01: 'determined state OFF',
-    0x02: 'determined state ON',
-    0x03: 'indeterminate state'
+DPI_ENUM = {
+    0x00: 'Indeterminate or Intermediate state',
+    0x01: 'Determined state OFF',
+    0x02: 'Determined state ON',
+    0x03: 'Indeterminate state'
 }
 
 TRANSIENT = {
@@ -138,7 +136,7 @@ TRANSIENT = {
     0x80: 'in transient'
 }
 
-QOi = {
+QOI_ENUM = {
     0x14: 'Station interrogation (global)',
     0x15: 'Interrogation of group 1',
     0x16: 'Interrogation of group 2',
@@ -158,20 +156,18 @@ QOi = {
     0x24: 'Interrogation of group 16'
 }
 
-SPI = {
-    0x00: 'OFF',
-    0x01: 'ON'
-}
 
-R = {
-    0x00: 'local power switch on',
-    0x01: 'local manual reset',
-    0x02: 'remote reset',
+R_ENUM = {
+    0x00: 'Local power switch on',
+    0x01: 'Local manual reset',
+    0x02: 'Remote reset',
 }
+for i in range(0x03, 0x7f):
+    R_ENUM[i] = 'Undefined'
 
-I = {
-    0x00: 'initialization with unchanged local parameters',
-    0x80: 'initialization after change of local parameters'
+I_ENUM = {
+    0x00: 'Initialization with unchanged local parameters',
+    0x80: 'Initialization after change of local parameters'
 }
 
 QU = {
