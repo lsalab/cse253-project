@@ -1,78 +1,57 @@
 #!/usr/bin/env python3
 
 from struct import unpack
-from scapy.fields import PacketField, ShortField, FlagsField, ByteEnumField, XIntField
+from scapy.fields import PacketField, LEShortField, ShortField, FlagsField, ByteEnumField, BitEnumField, BitField, XIntField
 from .fields import IOAID, LEFloatField, ByteField, SignedShortField
-from .const import QDS_FLAGS, SU, DOW, SEL_EXEC, DPI_ENUM, DIQ_FLAGS, SIQ_FLAGS, TRANSIENT, QOI_ENUM, R_ENUM, I_ENUM, QU_ENUM, SEL_EXEC, SCS_ENUM
+from .const import QDS_FLAGS, SU, DOW_ENUM, SEL_EXEC, DPI_ENUM, DIQ_FLAGS, SIQ_FLAGS, TRANSIENT, QOI_ENUM, R_ENUM, I_ENUM, QU_ENUM, SEL_EXEC, SCS_ENUM
 from scapy.packet import Packet
-
-# class BSI(Packet):
-#     name = 'BSI'
-#     fields_desc = [
-#         ShortField('BSI',None),
-#     ]
-
-#     def do_dissect(self, s):
-#         self.BSI = ''.join(format(bt, '08b') for bt in s[0:4])
-#         return s[4:]
-
-#     def do_build(self):
-#         s = list(range(4))
-#         s[0] = self.BSI & 0xFF
-#         s[1] = self.BSI & 0xFF00
-#         s[2] = self.BSI & 0xFF0000
-#         s[3] = self.BSI & 0xFF000000
-
-#         return s
-
-#     def __bytes__(self):
-#         return bytes(self.build())
-    
-#     def extract_padding(self, s):
-#         return '', s
 
 class COI(Packet):
     name = 'COI'
     fields_desc = [
-        ByteEnumField('R', None, R_ENUM),
-        ByteEnumField('I', None, I_ENUM),
+        BitEnumField('I', None, 1, I_ENUM),
+        BitEnumField('R', None, 7, R_ENUM),
+        # ByteEnumField('R', None, R_ENUM),
+        # ByteEnumField('I', None, I_ENUM),
     ]
 
-    def do_dissect(self, s):
-        self.R = s[0] & 0x7f
-        self.I = s[0] & 0x80
-        return s[1:]
+    # def do_dissect(self, s):
+    #     self.R = s[0] & 0x7f
+    #     self.I = s[0] & 0x80
+    #     return s[1:]
     
 
-    def do_build(self):
-        s = list(range(1))
-        s[0] = self.I | self.R
-        return bytes(s)
+    # def do_build(self):
+    #     s = list(range(1))
+    #     s[0] = self.I | self.R
+    #     return bytes(s)
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class VTI(Packet):
     name = 'VTI'
     fields_desc = [
-        ByteField('Value',False),
-        ByteEnumField('Transient',None, TRANSIENT)
+        BitEnumField('Transient', None, 1, TRANSIENT),
+        BitField('Value', None, 7),
+        # ByteField('Value',False),
+        # ByteEnumField('Transient',None, TRANSIENT)
     ]
 
-    def do_dissect(self, s):
-        self.Value = s[0] & 0x7f
-        self.Transient = s[0] & 0x80
+    # def do_dissect(self, s):
+    #     self.Value = s[0] & 0x7f
+    #     self.Transient = s[0] & 0x80
 
-        return s[1:]
+    #     return s[1:]
 
-    def do_build(self):
-        s = list(range(1))
-        s[0] = self.Transient | self.Value
+    # def do_build(self):
+    #     s = list(range(1))
+    #     s[0] = self.Transient | self.Value
         
-        return bytes(s)
+    #     return bytes(s)
     
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class DIQ(Packet):
     name = 'QDS'
@@ -108,111 +87,128 @@ class DIQ(Packet):
 class QOS(Packet):
     name = 'QOS'
     fields_desc = [
-        ByteField('QL',False),
-        ByteEnumField('SE', 0x00, SEL_EXEC)
+        BitEnumField('SE', 0x00, 1, SEL_EXEC),
+        BitField('QL', 0x00, 7),
+        # ByteField('QL',False),
+        # ByteEnumField('SE', 0x00, SEL_EXEC)
     ]
 
-    def do_dissect(self, s):
-        self.QL = s[0] & 0x7F
-        self.SE = s[0] & 0x10
+    # def do_dissect(self, s):
+    #     self.QL = s[0] & 0x7F
+    #     self.SE = s[0] & 0x80
 
-        return s[1:]
+    #     return s[1:]
 
-    def do_build(self):
-        s = list(range(1))
-        s[0] = (self.SE << 7 &  0x80) | (self.QL & 0x7F)
+    # def do_build(self):
+    #     s = list(range(1))
+    #     s[0] = (self.SE << 7 &  0x80) | (self.QL & 0x7F)
         
-        return s
+    #     return s
 
-    def __bytes__(self):
-        return bytes(self.build())
+    # def __bytes__(self):
+    #     return bytes(self.build())
     
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class CP56Time(Packet):
 
     name = 'CP56Time'
     fields_desc = [
-        ByteField('MS',None),
-        ByteField('Min',None),
-        ByteField('IV',None),
-        ByteField('Hour',None),
-        ByteField('SU',None),
-        ByteField('Day',None),
-        ByteField('DOW',None),
-        ByteField('Month',None),
-        ByteField('Year',None),
+        LEShortField('MS', 0),
+        BitField('IV', 0, 1),
+        BitField('RES1', 0, 1),
+        BitField('Min', 0, 6),
+        BitField('SU', 0, 1),
+        BitField('RES2', 0, 2),
+        BitField('Hour', 0, 5),
+        BitEnumField('DOW', 0, 3, DOW_ENUM),
+        BitField('Day', 0, 5),
+        BitField('RES3', 0, 4),
+        BitField('Month', 0, 4),
+        BitField('RES4', 0, 1),
+        BitField('Year', 0, 7),
+        # ByteField('MS',None),
+        # ByteField('Min',None),
+        # ByteField('IV',None),
+        # ByteField('Hour',None),
+        # ByteField('SU',None),
+        # ByteField('Day',None),
+        # ByteField('DOW',None),
+        # ByteField('Month',None),
+        # ByteField('Year',None),
     ]
 
-    def do_dissect(self, s):
-        try:
-            self.MS = unpack('<H',s[0:2])[0]
-            self.Min = int(s[2] & 0x3f)
-            self.IV = int(s[2] & 0x80)
-            self.Hour = int(s[3] & 0x1F)
-            self.SU = int(s[3] & 0x80)
-            self.Day = int(s[4] & 0x1F)
-            self.DOW = int(s[4] & 0xE0)
-            self.Month = int(s[5] & 0x0F)
-            self.Year = int(s[6] & 0x7F)
-            return s[7:]
-        except IndexError:
-            self.MS = 0
-            self.Min = 0
-            self.IV = 0
-            self.Hour = 0
-            self.SU = 0
-            self.Day = 0
-            self.DOW = 0
-            self.Month = 0
-            self.Year = 0
-            return bytes(b'')
+    # def do_dissect(self, s):
+    #     try:
+    #         self.MS = unpack('<H',s[0:2])[0]
+    #         self.Min = int(s[2] & 0x3f)
+    #         self.IV = int(s[2] & 0x80)
+    #         self.Hour = int(s[3] & 0x1F)
+    #         self.SU = int(s[3] & 0x80)
+    #         self.Day = int(s[4] & 0x1F)
+    #         self.DOW = int(s[4] & 0xE0)
+    #         self.Month = int(s[5] & 0x0F)
+    #         self.Year = int(s[6] & 0x7F)
+    #         return s[7:]
+    #     except IndexError:
+    #         self.MS = 0
+    #         self.Min = 0
+    #         self.IV = 0
+    #         self.Hour = 0
+    #         self.SU = 0
+    #         self.Day = 0
+    #         self.DOW = 0
+    #         self.Month = 0
+    #         self.Year = 0
+    #         return bytes(b'')
 
-    def do_build(self):
-        s = list(range(7))
-        s[0] = self.MS & 0xFF
-        s[1] = (self.MS >> 8) & 0xFF
-        s[2] = (self.IV & 0x80) | (self.Min & 0x3F)
-        s[3] = (self.SU & 0x80) | (self.Hour & 0x1F)
-        s[4] = (self.DOW & 0xE0) | (self.Day & 0x1F)
-        s[5] = self.Month & 0xF
-        s[6] = (self.Year & 0x7F)
+    # def do_build(self):
+    #     s = list(range(7))
+    #     s[0] = self.MS & 0xFF
+    #     s[1] = (self.MS >> 8) & 0xFF
+    #     s[2] = (self.IV & 0x80) | (self.Min & 0x3F)
+    #     s[3] = (self.SU & 0x80) | (self.Hour & 0x1F)
+    #     s[4] = (self.DOW & 0xE0) | (self.Day & 0x1F)
+    #     s[5] = self.Month & 0xF
+    #     s[6] = (self.Year & 0x7F)
         
-        return bytes(s)
+    #     return bytes(s)
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class SCO(Packet):
     name = 'SCO'
     fields_desc = [
-        ByteEnumField('SCS', 0x00, SCS_ENUM),
-        ByteEnumField('QU', None, QU_ENUM),
-        ByteEnumField('SE', None, SEL_EXEC)
+        BitEnumField('SE', 0, 1, SEL_EXEC),
+        BitEnumField('QU', 0, 6, QU_ENUM),
+        BitEnumField('SCS', 0, 1, SCS_ENUM),
+        # ByteEnumField('SCS', 0x00, SCS_ENUM),
+        # ByteEnumField('QU', None, QU_ENUM),
+        # ByteEnumField('SE', None, SEL_EXEC)
     ]
 
-    def do_dissect(self, s):
-        self.SCS = s[0] & 0x01
-        self.QU = s[0] & 0x7C
-        self.SE = s[0] & 0x80
+    # def do_dissect(self, s):
+    #     self.SCS = s[0] & 0x01
+    #     self.QU = s[0] & 0x7C
+    #     self.SE = s[0] & 0x80
 
-        return s[1:]
+    #     return s[1:]
 
-    def do_build(self):
-        s = list(range(1))
-        s[0] = self.SE | self.SCS | self.QU
+    # def do_build(self):
+    #     s = list(range(1))
+    #     s[0] = self.SE | self.SCS | self.QU
 
-        return s
+    #     return s
 
-    def __bytes__(self):
-        return bytes(self.build())
+    # def __bytes__(self):
+    #     return bytes(self.build())
     
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA36(Packet):
-
     name = 'IOA'
     fields_desc = [
         IOAID('IOA', None),
@@ -221,8 +217,8 @@ class IOA36(Packet):
         PacketField('CP56Time', None, CP56Time),
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA13(Packet):
     name = 'IOA'
@@ -232,8 +228,8 @@ class IOA13(Packet):
         FlagsField('QDS', 0x00, 8, QDS_FLAGS),
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA9(Packet):
     name = 'IOA'
@@ -243,8 +239,8 @@ class IOA9(Packet):
         FlagsField('QDS', 0x00, 8, QDS_FLAGS),
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA50(Packet):
     name = 'IOA'
@@ -254,8 +250,8 @@ class IOA50(Packet):
         PacketField('QOS', None, QOS)
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA3(Packet):
     name = 'IOA'
@@ -264,8 +260,8 @@ class IOA3(Packet):
         PacketField('DIQ', None, DIQ)
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA5(Packet):
     name = 'IOA'
@@ -275,8 +271,8 @@ class IOA5(Packet):
         FlagsField('QDS', 0x00, 8, QDS_FLAGS),
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA100(Packet):
     name = 'IOA'
@@ -285,8 +281,8 @@ class IOA100(Packet):
         ByteEnumField('QOI', None, QOI_ENUM),
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA103(Packet):
     name = 'IOA'
@@ -295,8 +291,8 @@ class IOA103(Packet):
         PacketField('CP56Time', None, CP56Time)
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA30(Packet):
     name = 'IOA'
@@ -306,8 +302,8 @@ class IOA30(Packet):
         PacketField('CP56Time', None, CP56Time)
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA70(Packet):
     name = 'IOA'
@@ -316,8 +312,8 @@ class IOA70(Packet):
         PacketField('COI', None, COI),
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA31(Packet):
     name = 'IOA'
@@ -327,8 +323,8 @@ class IOA31(Packet):
         PacketField('CP56Time', None, CP56Time)
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA1(Packet):
     name = 'IOA'
@@ -337,8 +333,8 @@ class IOA1(Packet):
         FlagsField('SIQ', 0x00, 8, SIQ_FLAGS),
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA7(Packet):
     name = 'IOA'
@@ -350,8 +346,8 @@ class IOA7(Packet):
         FlagsField('QDS', 0x00, 8, QDS_FLAGS),
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 class IOA45(Packet):
     name = 'IOA'
@@ -360,8 +356,8 @@ class IOA45(Packet):
         PacketField('SCO', None, SCO)
     ]
 
-    def extract_padding(self, s):
-        return '', s
+    # def extract_padding(self, s):
+    #     return '', s
 
 IOAS = {
     36: IOA36,
