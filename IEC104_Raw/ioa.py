@@ -3,7 +3,7 @@
 from struct import unpack
 from scapy.fields import PacketField, ShortField, FlagsField, ByteEnumField, XIntField
 from .fields import IOAID, LEFloatField, ByteField, SignedShortField
-from .const import QDS, SU, DOW, SE, DPI_ENUM, DIQ_FLAGS, SIQ_FLAGS, TRANSIENT, QOI_ENUM, R_ENUM, I_ENUM, QU, SEL_EXEC
+from .const import QDS_FLAGS, SU, DOW, SEL_EXEC, DPI_ENUM, DIQ_FLAGS, SIQ_FLAGS, TRANSIENT, QOI_ENUM, R_ENUM, I_ENUM, QU_ENUM, SEL_EXEC, SCS_ENUM
 from scapy.packet import Packet
 
 # class BSI(Packet):
@@ -78,7 +78,7 @@ class DIQ(Packet):
     name = 'QDS'
     fields_desc = [
         ByteEnumField('DPI', 0x00, DPI_ENUM),
-        FlagsField('flags', 0x00, DIQ_FLAGS),
+        FlagsField('flags', 0x00, 8, DIQ_FLAGS),
         # ByteField('BL',None),
         # ByteField('SB',None),
         # ByteField('NT',None),
@@ -187,21 +187,21 @@ class CP56Time(Packet):
 class SCO(Packet):
     name = 'SCO'
     fields_desc = [
-        ByteField('SCS',False),
-        ByteField('QU',None),
-        ByteField('SE',None)
+        ByteEnumField('SCS', 0x00, SCS_ENUM),
+        ByteEnumField('QU', None, QU_ENUM),
+        ByteEnumField('SE', None, SEL_EXEC)
     ]
 
     def do_dissect(self, s):
         self.SCS = s[0] & 0x01
-        self.QU = QU[s[0] & 0x7C]
-        self.SE = SE[s[0] & 0x80]
+        self.QU = s[0] & 0x7C
+        self.SE = s[0] & 0x80
 
         return s[1:]
 
     def do_build(self):
         s = list(range(1))
-        s[0] = (self.SE << 7 &  0x80) | (self.SCS & 0x01) | (self.QU << 6 & 0x7C)
+        s[0] = self.SE | self.SCS | self.QU
 
         return s
 
@@ -217,7 +217,7 @@ class IOA36(Packet):
     fields_desc = [
         IOAID('IOA', None),
         LEFloatField('Value', None),
-        FlagsField('QDS', 0x00, 8, QDS),
+        FlagsField('QDS', 0x00, 8, QDS_FLAGS),
         PacketField('CP56Time', None, CP56Time),
     ]
 
@@ -229,7 +229,7 @@ class IOA13(Packet):
     fields_desc = [
         IOAID('IOA', None),
         LEFloatField('Value', None),
-        FlagsField('QDS', 0x00, 8, QDS),
+        FlagsField('QDS', 0x00, 8, QDS_FLAGS),
     ]
 
     def extract_padding(self, s):
@@ -240,7 +240,7 @@ class IOA9(Packet):
     fields_desc = [
         IOAID('IOA', None),
         SignedShortField('Value', None),
-        FlagsField('QDS', 0x00, 8, QDS),
+        FlagsField('QDS', 0x00, 8, QDS_FLAGS),
     ]
 
     def extract_padding(self, s):
@@ -272,7 +272,7 @@ class IOA5(Packet):
     fields_desc = [
         IOAID('IOA', None),
         PacketField('VTI', None, VTI),
-        FlagsField('QDS', 0x00, 8, QDS),
+        FlagsField('QDS', 0x00, 8, QDS_FLAGS),
     ]
 
     def extract_padding(self, s):
@@ -302,7 +302,7 @@ class IOA30(Packet):
     name = 'IOA'
     fields_desc = [
         IOAID('IOA', None),
-        FlagsField('SIQ', 0x00, SIQ_FLAGS),
+        FlagsField('SIQ', 0x00, 8, SIQ_FLAGS),
         PacketField('CP56Time', None, CP56Time)
     ]
 
@@ -334,7 +334,7 @@ class IOA1(Packet):
     name = 'IOA'
     fields_desc = [
         IOAID('IOA', None),
-        FlagsField('SIQ', 0x00, SIQ_FLAGS),
+        FlagsField('SIQ', 0x00, 8, SIQ_FLAGS),
     ]
 
     def extract_padding(self, s):
@@ -346,8 +346,8 @@ class IOA7(Packet):
         IOAID('IOA', None),
         # PacketField('BSI', None, BSI),
         XIntField('BSI', 0x00000000),
-        # PacketField('QDS', None, QDS)
-        FlagsField('QDS', 0x00, 8, QDS),
+        # PacketField('QDS', None, QDS_FLAGS)
+        FlagsField('QDS', 0x00, 8, QDS_FLAGS),
     ]
 
     def extract_padding(self, s):

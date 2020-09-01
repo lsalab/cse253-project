@@ -190,7 +190,9 @@ if __name__ == '__main__':
     from binascii import hexlify, unhexlify
     print('Dissecting "68040e001e00" ...\r\n')
     data = unhexlify('68040e001e00')
+    data2 = unhexlify('00000c9ff00000090f09020708004500003a1dc540003f06337fc0a8fa03c0a86f25cdf40964d5df3c27dab0e477801801f5de5400000101080abca025b50574f04168040100c252')
     APDU(data).show()
+    Ether(data2).show()
     print('\r\nBuilding "68040e001e00"...\r\n')
     pkt = APDU()/APCI(ApduLen=4, Type=0x00, Tx=7, Rx=15)
     a = pkt.build()

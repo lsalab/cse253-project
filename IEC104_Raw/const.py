@@ -170,7 +170,7 @@ I_ENUM = {
     0x80: 'Initialization after change of local parameters'
 }
 
-QU = {
+QU_ENUM = {
     0x00: 'no pulse defined',
     0x01: 'short pulse duration (circuit-breaker)',
     0x02: 'long pulse duration',
@@ -180,7 +180,7 @@ QU = {
     0x06: 'reserved',
 }
 
-SCS = {
+SCS_ENUM = {
     0x00: 'OFF',
     0x01: 'ON'
 }
