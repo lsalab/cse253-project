@@ -180,6 +180,8 @@ class APDU(Packet):
     def do_dissect(self, s):
         apci = APCI(s, _internal=1, _underlayer=self)
         self.add_payload(apci)
+        asdu = ASDU(s, _internal=1, _underlayer=self)
+        self.add_payload(asdu)
 
     def extract_padding(self, s):
         return None, s
