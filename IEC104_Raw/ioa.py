@@ -15,20 +15,6 @@ class COI(Packet):
         # ByteEnumField('I', None, I_ENUM),
     ]
 
-    # def do_dissect(self, s):
-    #     self.R = s[0] & 0x7f
-    #     self.I = s[0] & 0x80
-    #     return s[1:]
-    
-
-    # def do_build(self):
-    #     s = list(range(1))
-    #     s[0] = self.I | self.R
-    #     return bytes(s)
-
-    # def extract_padding(self, s):
-    #     return '', s
-
 class VTI(Packet):
     name = 'VTI'
     fields_desc = [

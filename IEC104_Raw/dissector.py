@@ -173,6 +173,7 @@ if __name__ == '__main__':
     from binascii import hexlify, unhexlify
     from datetime import datetime
     from .ioa import CP56Time
+    
     ct = datetime.now()
     ct = CP56Time(MS=ct.second*1000+(ct.microsecond//1000), Min=ct.minute, IV=0, Hour=ct.hour, SU=0, Day=ct.day, DOW=ct.today().weekday()+1, Month=ct.month, Year=ct.year-2000)
     print('Dissecting "00000c9ff00000090f09020708004500003a1dc540003f06337fc0a8fa03c0a86f25cdf40964d5df3c27dab0e477801801f5de5400000101080abca025b50574f04168040100c252" ...\r\n')
