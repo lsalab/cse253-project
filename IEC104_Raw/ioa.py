@@ -1,41 +1,41 @@
 #!/usr/bin/env python3
 
 from struct import unpack
-from scapy.fields import PacketField, ShortField, FlagsField, ByteEnumField
+from scapy.fields import PacketField, ShortField, FlagsField, ByteEnumField, XIntField
 from .fields import IOAID, LEFloatField, ByteField, SignedShortField
 from .const import QDS, SU, DOW, SE, DPI_ENUM, DIQ_FLAGS, SIQ_FLAGS, TRANSIENT, QOI_ENUM, R_ENUM, I_ENUM, QU, SEL_EXEC
 from scapy.packet import Packet
 
-class BSI(Packet):
-    name = 'BSI'
-    fields_desc = [
-        ShortField('BSI',None),
-    ]
+# class BSI(Packet):
+#     name = 'BSI'
+#     fields_desc = [
+#         ShortField('BSI',None),
+#     ]
 
-    def do_dissect(self, s):
-        self.BSI = ''.join(format(bt, '08b') for bt in s[0:4])
-        return s[4:]
+#     def do_dissect(self, s):
+#         self.BSI = ''.join(format(bt, '08b') for bt in s[0:4])
+#         return s[4:]
 
-    def do_build(self):
-        s = list(range(4))
-        s[0] = self.BSI & 0xFF
-        s[1] = self.BSI & 0xFF00
-        s[2] = self.BSI & 0xFF0000
-        s[3] = self.BSI & 0xFF000000
+#     def do_build(self):
+#         s = list(range(4))
+#         s[0] = self.BSI & 0xFF
+#         s[1] = self.BSI & 0xFF00
+#         s[2] = self.BSI & 0xFF0000
+#         s[3] = self.BSI & 0xFF000000
 
-        return s
+#         return s
 
-    def __bytes__(self):
-        return bytes(self.build())
+#     def __bytes__(self):
+#         return bytes(self.build())
     
-    def extract_padding(self, s):
-        return '', s
+#     def extract_padding(self, s):
+#         return '', s
 
 class COI(Packet):
     name = 'COI'
     fields_desc = [
-        ByteEnumField('R', None),
-        ByteEnumField('I', None),
+        ByteEnumField('R', None, R_ENUM),
+        ByteEnumField('I', None, I_ENUM),
     ]
 
     def do_dissect(self, s):
@@ -344,7 +344,8 @@ class IOA7(Packet):
     name = 'IOA'
     fields_desc = [
         IOAID('IOA', None),
-        PacketField('BSI', None, BSI),
+        # PacketField('BSI', None, BSI),
+        XIntField('BSI', 0x00000000),
         # PacketField('QDS', None, QDS)
         FlagsField('QDS', 0x00, 8, QDS),
     ]
