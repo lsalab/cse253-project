@@ -6,6 +6,7 @@ from Crypto.Random.random import randint
 from threading import Thread
 from time import sleep
 from IEC104.dissector import APDU
+from IEC104.const import *
 from helper104 import *
 
 RTU_TYPES = [           # Supported RTU types
@@ -54,6 +55,7 @@ class RTU:
         self.__socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
         self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.__socket.bind(('0.0.0.0', IEC104_PORT))
+        self.__log = open(f'logs/rtu{self.__guid:d}.txt', 'w')
 
     @property
     def guid(self) -> int:
@@ -111,6 +113,7 @@ class RTU:
         msr = None
         self.__startdt[connid] = False
         wsock.settimeout(RTU_TIMEOUT)
+        self.__log.write(f'Initiating state handler with ID {connid:d}\r\n')
         while not self.terminate:
             try:
                 data = wsock.recv(BUFFER_SIZE)
@@ -118,6 +121,7 @@ class RTU:
                 atype = data['APCI'].Type
                 if msr is None: # STOPPED connection as shown in figure 17 from 60870-5-104 IEC:2006
                     if atype in [0x00, 0x01]: # I-frame (0x00) or S-frame (0x01)
+                        self.__log.write(f'Received an unexpected frame ({TYPE_APCI[atype]:s}) in "STOPPED connection" state. Terminating thread ...\r\n')
                         self.__terminate = True
                     elif atype == 0x03: # U-frame (0x03)
                         ut = data['APCI'].UType
@@ -176,18 +180,22 @@ class RTU:
         while not self.terminate:
             try:
                 wsock, addr = self.sock.accept() # Accept a new connection
+                self.__log.write(f'Incoming connection from {str(addr):s}\r\n')
                 if not self.__confok or len(threads) == 0:
                     wsock.settimeout(SOCK_TIMEOUT)
+                    self.__log.write(f'Creating state transition handler for {str(addr):s}\r\n')
                     t = Thread(target=self.__subloop, kwargs={'wsock': wsock}) # Create a state transition handler
                     threads.append(t) # Keep track of all the incoming connections
                     t.start() # Start the state transition handler for this new connection
                 else:
+                    self.__log.write(f'Connection from {str(addr):s} rejeected. only one connection allowed.\r\n')
                     wsock.close()
             except socket.timeout:
                 pass
         for t in threads:
             t.join()
         self.sock.close()
+        self.__log.close()
     
     def __str__(self):
         return 'RTU\r\n------------------\r\nID: {0:11d}\r\nType: {1:12s}'.format(self.__guid, RTU_TYPES[self.__type])
