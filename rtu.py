@@ -225,7 +225,7 @@ class Source(RTU):
     def __repr__(self):
         return 'Source RTU ({0:d}, {1:.2f})'.format(self.guid, self.__voltage)
 
-    def __measure(self, connid: int, wsock: socket.socket):
+    def _rtu__measure(self, connid: int, wsock: socket.socket):
         while self.startdt[connid]:
             if all(x is not None for x in [self.tx, self.rx]):
                 # ASDU Type 36: M_ME_TF_1
@@ -243,7 +243,7 @@ class Source(RTU):
                     break
             sleep(1)
     
-    def __handle_iframe(self, wsock, apdu):
+    def _rtu__handle_iframe(self, wsock, apdu):
         data = apdu
         self.__rx += 1
         self.__tx = apdu['APCI'].Rx
@@ -358,7 +358,7 @@ class Transmission(RTU):
         if self.rx >= 65536:
             self.rx = 0
 
-    def __handle_iframe(self, wsock, apdu):
+    def _rtu__handle_iframe(self, wsock, apdu):
         try:
             asdu = apdu['ASDU']
             if asdu.TypeId == 45: # C_SC_NA_1 defined in section 7.3.2.1 of 60870-5-101 IEC:2003
@@ -400,7 +400,7 @@ class Transmission(RTU):
             if e.errno != errno.ECONNRESET:
                 raise
     
-    def __measure(self, wsock: socket.socket, connid:int):
+    def _rtu__measure(self, wsock: socket.socket, connid:int):
         while self.startdt[connid]:
             if all(x is not None for x in [self.tx, self.rx]):
                 try:
@@ -469,7 +469,7 @@ class Load(RTU):
     def __repr__(self):
         return 'Load RTU ({0:d}, {1:.2f})'.format(self.guid, self.__load)
 
-    def __measure(self, wsock: socket.socket, connid:int):
+    def _rtu__measure(self, wsock: socket.socket, connid:int):
         while self.startdt[connid]:
             if all(x is not None for x in [self.tx, self.rx]):
                 try:
@@ -491,7 +491,7 @@ class Load(RTU):
                     break
             sleep(1)
     
-    def __handle_iframe(self, wsock, apdu):
+    def _rtu__handle_iframe(self, wsock, apdu):
         self.__rx += 1
         self.__tx = apdu['APCI'].Rx
         data = apdu
