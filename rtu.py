@@ -1,42 +1,56 @@
 #!/usr/bin/env python3
 
-from IEC104_Raw.dissector import APDU
-from iec104 import IEC104, get_command
 import socket
 import errno
+from Crypto.Random.random import randint
 from threading import Thread
 from time import sleep
+from IEC104.dissector import APDU
+from helper104 import *
 
-RTU_TYPES = [
+RTU_TYPES = [           # Supported RTU types
     'SOURCE',
     'TRANSMISSION',
     'LOAD'
 ]
 
-RTU_SOURCE = 0
-RTU_TRANSMISSION = 1
-RTU_LOAD = 2
+RTU_SOURCE = 0          # RTU_TYPES index for a "SOURCE" RTU
+RTU_TRANSMISSION = 1    # RTU_TYPES index for a "TRANSMISSION" RTU
+RTU_LOAD = 2            # RTU_TYPES index for a "LOAD" RTU
 
-BREAKERS = {
-    101: 0x1, # 001
-    102: 0x2, # 010
-    103: 0x4  # 100
-}
+RTU_TIMEOUT = 15        # 15-second "T1", as specified in Section 9.6 of 60870-5-104 IEC:2006
+SOCK_TIMEOUT = 0.25     # Socket timeout for incoming TCP connections, prevents a blocking listen() in the main thread
 
-IEC104_PORT = 2404
-BUFFER_SIZE = 512
+RTU_BASE_IOA = 1001     # Arbitrary value indicating the lowest IOA used by the simulation to store measurement values
+RTU_BREAKER_BASE = 101  # Arbitrary value indicating the lowest IOA used by the simulation to store breaker status
+RTU_NUM_BREAKERS = 3    # Arbitrary value indicating the amount of breakers managed by a Transmission RTU
+
+BREAKERS = {}           # Breaker status values for a "TRANSMISSION" RTU. The status is handled as a bitfield, one bit per breaker.
+for i in range(RTU_NUM_BREAKERS):
+    BREAKERS[RTU_BREAKER_BASE + i] = 2 ** i
+
+IEC104_PORT = 2404      # Standard TCP port used for IEC 60870-5-104
+BUFFER_SIZE = 8192      # Receiving buffer size. At most 128 64-byte IOA in a single APDU
 
 class RTU:
+    '''
+    Base class for all supported RTU types
+    
+    This class defined the common handling of the different state transitions for the Start/Stop procedure.
+
+    Every sub-class must implement the appropriate measurement and i-frame handling methods.
+    '''
 
     def __init__(self, **kwargs):
         fields = ['guid', 'type']
         if any(k not in kwargs.keys() or not isinstance(kwargs[k], int) for k in fields):
             raise AttributeError()
-        self.__guid = kwargs['guid']
-        self.__type = kwargs['type']
-        self.__terminate = False
-        self.__tx = 0
-        self.__rx = 0
+        self.__guid = kwargs['guid']    # ASDU ID
+        self.__type = kwargs['type']    # RTU type
+        self.__terminate = False        # Termination flag
+        self.__startdt = {}             # State markers for each connection
+        self.__tx = 0                   # Transmission counter (0 <= tx <= 65535)
+        self.__rx = 0                   # Reception counter (0 <= rx <= 65535)
         self.__socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
         self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.__socket.bind(('0.0.0.0', IEC104_PORT))
@@ -82,12 +96,98 @@ class RTU:
     @rx.setter
     def rx(self, value: int):
         self.__rx = value
-
-    # def get_pack(self, dato):
-
+    
+    def __measure(self, wsock:socket.socket, connid:int):
+        'Override this method with the appripriate measurement procedure for the specific RTU'
+    
+    def __handle_iframe(self, wsock:socket.socket, apdu:APDU):
+        'Override this method with the appropriate I-frame handling procedure for the specific RTU'
+    
+    def __subloop(self, wsock: socket.socket):
+        'This method handles the state transitions for the Start/Stop procedures'
+        connid = randint(0, 65535)
+        while connid in self.__startdt.keys():
+            connid = randint(0, 65535)
+        msr = None
+        self.__startdt[connid] = False
+        wsock.settimeout(RTU_TIMEOUT)
+        while not self.terminate:
+            try:
+                data = wsock.recv(BUFFER_SIZE)
+                data = APDU(data)
+                atype = data['APCI'].Type
+                if msr is None: # STOPPED connection as shown in figure 17 from 60870-5-104 IEC:2006
+                    if atype in [0x00, 0x01]: # I-frame (0x00) or S-frame (0x01)
+                        self.__terminate = True
+                    elif atype == 0x03: # U-frame (0x03)
+                        ut = data['APCI'].UType
+                        if ut == 0x01: # STARTDT act
+                            data = startdt(True) # STARTDT actcon
+                        elif ut == 0x04: # STOPDT act
+                            data = stopdt(True) # STOPDT actcon
+                        else: # TESTFR act
+                            data = testfr(True) # TESTFR actcon
+                        # NOTE: If more than one bit is activated, it will be registered as a 'TESTFR act'
+                        wsock.send(data)
+                        if ut == 0x01: # Start the connection
+                            self.__startdt[connid] = True # Track the state of the current connection
+                            msr = Thread(target=self.__measure, kwargs={'wsock': wsock, 'connid': connid})
+                            msr.start() # Start measuring
+                else: # STARTED connection as shown in figure 17 from 60870-5-104 IEC:2006
+                    if atype == 0x03: # U-frame (0x03)
+                        ut = data['APCI'].UType
+                        if ut == 0x01: # STARTDT act
+                            data = startdt(True) # STARTDT actcon
+                        elif ut == 0x04: # STOPDT act
+                            data = stopdt(True) # STOPDT actcon
+                            self.__startdt[connid] = False # Change measurement state
+                            msr.join() # Stop measuring
+                            msr = None
+                        else: # TESTFR act
+                            data = testfr(True) # TESTFR actcon
+                        wsock.send(data)
+                    elif atype == 0x01: # S-frame (0x01)
+                        self.__tx = data['APCI'].Rx
+                    else: # I-frame (0x00)
+                        self.__handle_iframe(wsock, data)
+                # NOTE: In this particular simulation, we are not considering the 'Pending UNCONFIRMED STOPPED connection' state, as our responses are faster
+            except socket.timeout:
+                self.__terminate = True # RTU T1 timeout => terminate connection
+                break
+            except BrokenPipeError:
+                self.__terminate = True # Connection ended unexpectedly.
+                break
+            except socket.error as e:
+                if e.errno != errno.ECONNRESET:
+                    raise # Other unknown error
+                break
+        if msr is not None: # The connection was still measuring
+            self.__startdt[connid] = False # Change measurement state
+            msr.join() # Stop measuring
+            msr = None
+            self.__startdt.pop(connid) # Remove the connection tracking
+        wsock.close()
 
     def loop(self):
-        'Override this'
+        'This method handles the raw TCP listening socket, accepting new incoming connections.'
+        self.sock.settimeout(SOCK_TIMEOUT)
+        self.sock.listen()
+        threads = []
+        while not self.terminate:
+            try:
+                wsock, addr = self.sock.accept() # Accept a new connection
+                if not self.__confok or len(threads) == 0:
+                    wsock.settimeout(SOCK_TIMEOUT)
+                    t = Thread(target=self.__subloop, kwargs={'wsock': wsock}) # Create a state transition handler
+                    threads.append(t) # Keep track of all the incoming connections
+                    t.start() # Start the state transition handler for this new connection
+                else:
+                    wsock.close()
+            except socket.timeout:
+                pass
+        for t in threads:
+            t.join()
+        self.sock.close()
     
     def __str__(self):
         return 'RTU\r\n------------------\r\nID: {0:11d}\r\nType: {1:12s}'.format(self.__guid, RTU_TYPES[self.__type])
@@ -102,7 +202,6 @@ class Source(RTU):
         if 'voltage' not in kwargs.keys() or not isinstance(kwargs['voltage'], float):
             raise AttributeError()
         self.__voltage = kwargs['voltage']
-        self.__ioaV = IEC104(36, 1001)
         self.__confok = False
 
     @property
@@ -111,7 +210,6 @@ class Source(RTU):
     @voltage.setter
     def voltage(self, value: float):
         self.__voltage = value
-        self.__ioaV = IEC104(36, 1001)
     
     def __str__(self):
         return 'Source RTU\r\n----------------\r\nID: {0:11d}\r\nVout: {1:6.2f}'.format(self.guid, self.__voltage)
@@ -119,14 +217,14 @@ class Source(RTU):
     def __repr__(self):
         return 'Source RTU ({0:d}, {1:.2f})'.format(self.guid, self.__voltage)
 
-    
-    def subloop(self, wsock: socket.socket):
-        while not self.terminate:
+    def __measure(self, connid: int, wsock: socket.socket):
+        while self.startdt[connid]:
             if all(x is not None for x in [self.tx, self.rx]):
+                # ASDU Type 36: M_ME_TF_1
+                data = build_104_asdu_packet(36, self.guid, RTU_BASE_IOA, self.tx, self.rx, 3, value=self.__voltage)
                 self.tx += 1
                 if self.tx == 65536:
                     self.tx = 0
-                data = self.__ioaV.get_apdu(self.__voltage, self.tx, self.rx)
                 try:
                     wsock.send(data)
                 except BrokenPipeError:
@@ -136,27 +234,16 @@ class Source(RTU):
                         raise
                     break
             sleep(1)
-        wsock.close()
     
-    def loop(self):
-        self.sock.settimeout(0.25)
-        self.sock.listen()
-        threads = []
-        while not self.terminate:
-            try:
-                wsock, addr = self.sock.accept()
-                if not self.__confok or len(threads) == 0:
-                    wsock.settimeout(0.25)
-                    t = Thread(target=self.subloop, kwargs={'wsock': wsock})
-                    threads.append(t)
-                    t.start()
-                else:
-                    wsock.close()
-            except socket.timeout:
-                pass
-        for t in threads:
-            t.join()
-        self.sock.close()
+    def __handle_iframe(self, wsock, apdu):
+        data = apdu
+        self.__rx += 1
+        self.__tx = apdu['APCI'].Rx
+        data['APCI'].Tx = self.__tx
+        self.__tx += 1
+        data['APCI'].Rx = self.__rx
+        data['ASDU'].CauseTx = 45       # Cause of transmission: Unknown cause of transmission. A source RTU should not receive any commands.
+        wsock.send(data)
 
 class Transmission(RTU):
 
@@ -180,11 +267,7 @@ class Transmission(RTU):
         self.__vout = None
         self.__amp = None
         self.__rload = None
-        self.__ioaV = IEC104(36, 1001)
-        self.__ioaI = IEC104(36, 1002)
-        self.__ioaBR = {}
-        for i in BREAKERS.keys():
-            self.__ioaBR[i] = [ IEC104(3, i), IEC104(50, i) ]
+        self.__wait_exec = None
 
     @property
     def state(self) -> float:
@@ -247,90 +330,96 @@ class Transmission(RTU):
         if self.__state == 0:
             self.__load = float('inf')
             return
-        for i in range(len(self.__loads)):
-            if (self.__state & (2 ** i)) > 0:
-                if self.__loads[i] == 0:
-                    self.__load = 0 # Failure
+        for i in range(len(self.__loads)): # Iterate over the breakers
+            if (self.__state & (2 ** i)) == 0: # If the current breaker is 'OFF' => Corresponding load is connected
+                if self.__loads[i] == 0:    # Load == 0 => Failure (not yet implemented)
+                    self.__load = 0
                     return
                 self.__load = self.__loads[i] if self.__load is None else (self.__load * self.__loads[i]) / (self.__load + self.__loads[i])
 
-    def receive_command(self, sock: socket.socket):
-        while not self.terminate:
-            try:
-                data = APDU(sock.recv(BUFFER_SIZE))
-                data = get_command(data)
-                if data['ioa'] in self.__ioaBR.keys():
-                    self.tx = data['rx'] + 1
-                    self.rx = data['tx'] + 1
-                    if self.tx == 65536:
-                        self.tx = 0
-                    if self.rx == 65536:
-                        self.rx = 0
-                    sock.send(self.__ioaBR[data['ioa']][1].get_apdu(data['value'], data['rx'] + 1, data['tx'] + 1, 7))
-                    if bool(data['value']):
-                        self.__state = self.__state | BREAKERS[data['ioa']] # STATE OR IOA
-                    else: 
-                        self.__state = self.__state & (BREAKERS[data['ioa']] ^ 0x7) # STATE AND (IOA XOR 111)
-            except socket.timeout:
-                pass
-            except BrokenPipeError:
-                break
-            except socket.error as e:
-                if e.errno != errno.ECONNRESET:
-                    raise
-                break
+    def __increment_counters(self, rx:int=None, tx:int=None):
+        '''
+        Increment the internal RX and TX counters.
 
-    def subloop(self, wsock: socket.socket):
-        cmd = Thread(target=self.receive_command, kwargs={'sock': wsock})
-        cmd.start()
-        while not self.terminate:
-            try:
-                if all(x is not None for x in [self.tx, self.rx]):
+        The parameters rx end tx refer to the Rx and Tx in the APCI layer of the received packet, if any.
+        '''
+        self.tx = rx if rx is not None else self.tx + 1
+        self.rx = tx if tx is not None else self.rx + 1
+        if self.tx >= 65536:
+            self.tx = 0
+        if self.rx >= 65536:
+            self.rx = 0
+
+    def __handle_iframe(self, wsock, apdu):
+        try:
+            asdu = apdu['ASDU']
+            if asdu.TypeId == 45: # C_SC_NA_1 defined in section 7.3.2.1 of 60870-5-101 IEC:2003
+                self.__increment_counters(apdu['APCI'].Rx + 1, apdu['APCI'].Tx + 1)
+                if self.__wait_exec is None and asdu['IOA45'].SCO.SE == 0x80 and asdu.causeTx == 6: # SCO: Select; Cause of transmission: Activation
+                    if asdu['IOA45'].IOA in BREAKERS.keys():
+                        self.__wait_exec = asdu['IOA45'].IOA
+                        data = build_104_asdu_packet(45, self.__guid, asdu['IOA45'].IOA, self.tx, self.rx, 7, SE=asdu.SCO.SE, QU=asdu.SCO.QU, SCS=asdu.SCO.SCS) # SCO: Select; Cause of transmission: Activation Confirmation
+                    else:
+                        data = build_104_asdu_packet(45, self.__guid, asdu['IOA45'].IOA, self.tx, self.rx, 47, SE=asdu.SCO.SE, QU=asdu.SCO.QU, SCS=asdu.SCO.SCS) # SCO: Select; Cause of transmission: Unknown information object address
+                elif self.__wait_exec is not None and asdu['IOA45'].SCO.SE == 0x00 and asdu.causeTx == 6: # SCO: Execute; Cause of transmission: Activation
+                    if self.__wait_exec == asdu['IOA45'].IOA:
+                        data = build_104_asdu_packet(45, self.__guid, asdu['IOA45'].IOA, self.tx, self.rx, 7, SE=asdu.SCO.SE, QU=asdu.SCO.QU, SCS=asdu.SCO.SCS) # SCO: Execute; Cause of transmission: Activation Confirmation
+                        if bool(asdu['IOA45'].SCO.SCS):
+                            self.__state = self.__state | BREAKERS[self.__wait_exec] # STATE OR IOA
+                        else: 
+                            self.__state = self.__state & (BREAKERS[self.__wait_exec] ^ ((2 ** RTU_NUM_BREAKERS) - 1)) # STATE AND (IOA XOR 1...11)
+                    else:
+                        data = build_104_asdu_packet(45, self.__guid, asdu['IOA45'].IOA, self.tx, self.rx, 47, SE=asdu.SCO.SE, QU=asdu.SCO.QU, SCS=asdu.SCO.SCS) # SCO: Execute; Cause of transmission: Unknown information object address
+                elif self.__wait_exec is not None and asdu['IOA45'].SCO.SE == 0x80 and asdu.causeTx == 8: # SCO: Select; Cause of transmission: Deactivation
+                    data = build_104_asdu_packet(45, self.__guid, asdu['IOA45'].IOA, self.tx, self.rx, 9, SE=asdu.SCO.SE, QU=asdu.SCO.QU, SCS=asdu.SCO.SCS) # SCO: Select; Cause of transmission: Deactivation Confirmation
+                    self.__wait_exec = None
+                else:
+                    data = apdu
+                    data['APCI'].Rx = self.__rx
+                    data['APCI'].Tx = self.__tx
+                    data['ASDU'].CauseTx = 45 # Cause of transmission: Unknown cause of transmission
+            else:
+                data = apdu
+                data['APCI'].Rx = self.__rx
+                data['APCI'].Tx = self.__tx
+                data['ASDU'].CauseTx = 45 # Cause of transmission: Unknown cause of transmission
+            wsock.send(data)
+        except socket.timeout:
+            self.terminate =  True
+        except BrokenPipeError:
+            pass
+        except socket.error as e:
+            if e.errno != errno.ECONNRESET:
+                raise
+    
+    def __measure(self, wsock: socket.socket, connid:int):
+        while self.startdt[connid]:
+            if all(x is not None for x in [self.tx, self.rx]):
+                try:
+                    data = build_104_asdu_packet(36, self.guid, RTU_BASE_IOA, self.tx, self.rx, 3, value=self.__vin)
                     self.tx += 1
                     if self.tx == 65536:
                         self.tx = 0
-                    data = self.__ioaV.get_apdu(self.__vin - self.__vout, self.tx, self.rx)
                     wsock.send(data)
+                    data = build_104_asdu_packet(36, self.guid, RTU_BASE_IOA + 1, self.tx, self.rx, 3, value=self.__amp)
                     self.tx += 1
                     if self.tx == 65536:
                         self.tx = 0
-                    data = self.__ioaI.get_apdu((self.__vin - self.__vout)/self.__load, self.tx, self.rx)
                     wsock.send(data)
-                    for i in self.__ioaBR.keys():
+                    for i in range(len(self.__loads)):
+                        data = build_104_asdu_packet(3, self.guid, RTU_BREAKER_BASE + i, self.tx, self.rx, 3, value=(self.__state & BREAKERS[i]) // BREAKERS[i])
+                        self.tx += 1
                         if self.tx == 65536:
                             self.tx = 0
-                        data = self.__ioaBR[i][0].get_apdu((self.__state & BREAKERS[i]) / BREAKERS[i], self.tx, self.rx)
                         wsock.send(data)
-                sleep(1)
-            except BrokenPipeError:
-                break
-            except socket.error as e:
-                if e.errno != errno.ECONNRESET:
-                    raise
-                break
-        cmd.join()
-        wsock.close()
+                except BrokenPipeError:
+                    break
+                except socket.error as e:
+                    if e.errno != errno.ECONNRESET:
+                        raise
+                    break
+            sleep(1)
     
-    def loop(self):
-        self.sock.settimeout(0.25)
-        self.sock.listen()
-        threads = []
-        while not self.terminate:
-            try:
-                wsock, addr = self.sock.accept()
-                if not self.__confok or len(threads) == 0:
-                    wsock.settimeout(0.25)
-                    t = Thread(target=self.subloop, kwargs={'wsock': wsock})
-                    threads.append(t)
-                    t.start()
-                else:
-                    wsock.close()
-            except socket.timeout:
-                pass
-        for t in threads:
-            t.join()
-        self.sock.close()
-
 class Load(RTU):
 
     def __init__(self, **kwargs):
@@ -344,8 +433,6 @@ class Load(RTU):
         self.__confok = False
         self.__vin = None
         self.__amp = None
-        self.__ioaV = IEC104(36, 1001)
-        self.__ioaI = IEC104(36, 1002)
 
     @property
     def load(self) -> float:
@@ -374,49 +461,34 @@ class Load(RTU):
     def __repr__(self):
         return 'Load RTU ({0:d}, {1:.2f})'.format(self.guid, self.__load)
 
-    def subloop(self, wsock: socket.socket):
-        connalive = True
-        while not self.terminate and connalive:
-            try:
-                if all(x is not None for x in [self.tx, self.rx]):
+    def __measure(self, wsock: socket.socket, connid:int):
+        while self.startdt[connid]:
+            if all(x is not None for x in [self.tx, self.rx]):
+                try:
+                    data = build_104_asdu_packet(36, self.guid, RTU_BASE_IOA, self.tx, self.rx, 3, value=self.__vin)
                     self.tx += 1
                     if self.tx == 65536:
                         self.tx = 0
-                    data = self.__ioaV.get_apdu(self.__vin, self.tx, self.rx)
                     wsock.send(data)
+                    data = build_104_asdu_packet(36, self.guid, RTU_BASE_IOA + 1, self.tx, self.rx, 3, value=self.__amp)
                     self.tx += 1
                     if self.tx == 65536:
                         self.tx = 0
-                    data = self.__ioaI.get_apdu(self.__vin/self.load, self.tx, self.rx)
                     wsock.send(data)
-                sleep(1)
-            except BrokenPipeError:
-                connalive = False
-            except socket.error as e:
-                if e.errno != errno.ECONNRESET:
-                    raise
-                connalive = False
-        wsock.close()
+                except BrokenPipeError:
+                    break
+                except socket.error as e:
+                    if e.errno != errno.ECONNRESET:
+                        raise
+                    break
+            sleep(1)
     
-    def loop(self):
-        self.sock.settimeout(0.25)
-        self.sock.listen()
-        threads = []
-        while not self.terminate:
-            try:
-                wsock, addr = self.sock.accept()
-                if not self.__confok or len(threads) == 0:
-                    wsock.settimeout(0.25)
-                    t = Thread(target=self.subloop, kwargs={'wsock': wsock})
-                    threads.append(t)
-                    t.start()
-                else:
-                    wsock.close()
-            except socket.timeout:
-                pass
-        for t in threads:
-            t.join()
-        self.sock.close()
-    
-    
-
+    def __handle_iframe(self, wsock, apdu):
+        self.__rx += 1
+        self.__tx = apdu['APCI'].Rx
+        data = apdu
+        data['APCI'].Tx = self.__tx
+        self.__tx += 1
+        data['APCI'].Rx = self.__rx
+        data['ASDU'].CauseTx = 45
+        wsock.send(data)

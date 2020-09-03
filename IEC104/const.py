@@ -23,12 +23,12 @@ TYPE_APCI = {
 }
 
 UNNUMBERED_CONTROL_FIELD = {
-    0x80: 'TESTFR con',
-    0x40: 'TESTFR act',
-    0x20: 'STOPDT con',
-    0x10: 'STOPDT act',
-    0x08: 'STARTDT con',
-    0x04: 'STARTDT act'
+    0x01: 'STARTDT act',
+    0x02: 'STARTDT con',
+    0x04: 'STOPDT act',
+    0x08: 'STOPDT con',
+    0x10: 'TESTFR act',
+    0x20: 'TESTFR con',
 }
 
 CAUSE_OF_TX = {

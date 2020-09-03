@@ -6,7 +6,7 @@ import random
 from time import sleep
 from struct import pack, unpack
 from threading import Thread
-from rtu import RTU_SOURCE, RTU_TRANSMISSION, RTU_LOAD, RTU_TYPES
+from rtu import RTU, RTU_SOURCE, RTU_TRANSMISSION, RTU_LOAD, RTU_TYPES
 
 if sys.platform[:3] == 'win':
     print('Intended to be executed in a mininet Linux environment.')
@@ -22,10 +22,9 @@ SIM_BCAST = ip.interfaces[[x for x in ip.interfaces if ip.interfaces[x]['state']
 ip.release()
 del ip
 
-SIM_PORT = 20202
+SIM_PORT = 20202        # UDP port used for the simulation information exchange between the different RTUs
 BUFFER_SIZE = 512
-DATA_FMT = '<IIIIIff' # Sender-ID Receiver-ID Message-ID IARG-0 IARG-1 FARG-0 FARG-1
-
+DATA_FMT = '<IIIIIff'   # Sender-ID Receiver-ID Message-ID IARG-0 IARG-1 FARG-0 FARG-1
 
 # Message ID
 MSG_WERE = 0
@@ -43,7 +42,7 @@ class SimulationHandler(Thread):
 
     def __init__(self, rtu):
         super(SimulationHandler, self).__init__()
-        if rtu is None or rtu.__class__.__name__ not in ['Load', 'Transmission', 'Source', 'RTU']:
+        if rtu is None or rtu.__class__.__name__ not in ['Load', 'Transmission', 'Source'] or not isinstance(rtu, RTU):
             raise AttributeError()
         self.__rtu = rtu
         self.__terminate = False
