@@ -248,7 +248,7 @@ class SCADACLI(Cmd):
         self.__done = True
         for k, t in self.__threads.items():
             t.join()
-        for k, t in self.__keepalive_handler.items():
+        for k, t in self.__keepalive.items():
             t.join()
         for k, s in self.__rtu_comms.items():
             s.close()
