@@ -91,7 +91,11 @@ class SCADACLI(Cmd):
                 else: # Received a malformed packet => Alert user.
                     print(f'**** WARNING: Received a malformed packet from {str(self.__rtu_comms[k].getpeername()):s} ****')
             except (socket.timeout, KeyError, IndexError):
-                pass
+                self.__rtu_i_state[k] = None
+                self.__rtu_u_state[k] = None
+            except ConnectionResetError:
+                self.__rtu_i_state[k] = None
+                self.__rtu_u_state[k] = None
 
     def do_connect(self, arg: str):
         'Connect to a new RTU'
