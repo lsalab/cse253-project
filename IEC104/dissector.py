@@ -28,7 +28,7 @@ class ASDU(Packet):
         self.SQ =  s[1] & 0x80
         self.NumIx = s[1] & 0x7f
         self.CauseTx = s[2] & 0x3F
-        self.Negative = s[2] & 0x40
+        self.PN = s[2] & 0x40
         self.Test = s[2] & 0x80
         self.OA = s[3]
         self.Addr = unpack('<H',s[4:6])[0]
@@ -73,15 +73,16 @@ class ASDU(Packet):
         s = bytearray()
         s.append(self.TypeId)
         s.append(self.SQ | self.NumIx)
-        s.append(self.Test | self.Negative | self.CauseTx)
+        s.append(self.Test | self.PN | self.CauseTx)
         s.append(self.OA)
-        s.append(self.Addr & 0xff)
-        s.append(self.Addr >> 8)
+        s.append(int(self.Addr) & 0xff)
+        s.append(int(self.Addr) >> 8)
+        s = bytes(s)
         if self.IOA is not None:
             for i in self.IOA:
                 s += i.build()
         
-        return bytes(s)
+        return s
 
 class APCI(Packet):
 
@@ -135,7 +136,10 @@ class APCI(Packet):
                 s[3] = 0
             s[4] = (self.Rx << 1) & 0x00fe
             s[5] = ((self.Rx << 1) & 0xff00) >> 8
-        return bytes(s)
+        s = bytes(s)
+        if self.haslayer('ASDU'):
+            s += self.payload.build()
+        return s
 
     def extract_padding(self, s):
         if self.Type == 0x00 and self.ApduLen > 4:

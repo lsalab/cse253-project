@@ -34,7 +34,7 @@ class DIQ(Packet):
 
     def do_build(self):
         s = list(range(1))
-        s[0] = self.DPI | self.flags
+        s[0] = int(self.DPI) | int(self.flags)
         return bytes(s)
 
 class QOS(Packet):

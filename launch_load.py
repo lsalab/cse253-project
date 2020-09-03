@@ -13,7 +13,7 @@ if __name__ == '__main__':
         sys.exit()
     srtu = Load(guid=int(sys.argv[1]), type=RTU_LOAD, load=12.5, left=int(sys.argv[2]))
     hrtu = SimulationHandler(srtu)
-    def catch_sigterm():
+    def catch_sigterm(s, e):
         global hrtu
         global srtu
         hrtu.terminate = True

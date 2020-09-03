@@ -4,7 +4,9 @@ import socket
 import errno
 from Crypto.Random.random import randint
 from threading import Thread
+from datetime import datetime
 from time import sleep
+from binascii import hexlify
 from IEC104.dissector import APDU
 from IEC104.const import *
 from helper104 import *
@@ -26,9 +28,7 @@ RTU_BASE_IOA = 1001     # Arbitrary value indicating the lowest IOA used by the 
 RTU_BREAKER_BASE = 101  # Arbitrary value indicating the lowest IOA used by the simulation to store breaker status
 RTU_NUM_BREAKERS = 3    # Arbitrary value indicating the amount of breakers managed by a Transmission RTU
 
-BREAKERS = {}           # Breaker status values for a "TRANSMISSION" RTU. The status is handled as a bitfield, one bit per breaker.
-for i in range(RTU_NUM_BREAKERS):
-    BREAKERS[RTU_BREAKER_BASE + i] = 2 ** i
+BREAKERS = dict([(RTU_BREAKER_BASE + i, 2 ** i) for i in range(RTU_NUM_BREAKERS)]) # Breaker status values for a "TRANSMISSION" RTU. The status is handled as a bitfield, one bit per breaker.
 
 IEC104_PORT = 2404      # Standard TCP port used for IEC 60870-5-104
 BUFFER_SIZE = 8192      # Receiving buffer size. At most 128 64-byte IOA in a single APDU
@@ -52,10 +52,12 @@ class RTU:
         self.__startdt = {}             # State markers for each connection
         self.__tx = 0                   # Transmission counter (0 <= tx <= 65535)
         self.__rx = 0                   # Reception counter (0 <= rx <= 65535)
+        self.__confok = False
         self.__socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
         self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.__socket.bind(('0.0.0.0', IEC104_PORT))
         self.__log = open(f'logs/rtu{self.__guid:d}.txt', 'w')
+        self.__log.write(f'Instantiated a new {RTU_TYPES[self.__type]:s} RTU.\r\n')
 
     @property
     def guid(self) -> int:
@@ -99,6 +101,13 @@ class RTU:
     def rx(self, value: int):
         self.__rx = value
     
+    def log(self, msg:str):
+        self.__log.write(datetime.now().isoformat() + ' :: ')
+        self.__log.write(msg)
+        if msg[-2:] != '\r\n':
+            self.__log.write('\r\n')
+        self.__log.flush()
+    
     def __measure(self, wsock:socket.socket, connid:int):
         'Override this method with the appripriate measurement procedure for the specific RTU'
     
@@ -113,7 +122,7 @@ class RTU:
         msr = None
         self.__startdt[connid] = False
         wsock.settimeout(RTU_TIMEOUT)
-        self.__log.write(f'Initiating state handler with ID {connid:d}\r\n')
+        self.log(f'Initiating state handler with ID {connid:d}')
         while not self.terminate:
             try:
                 data = wsock.recv(BUFFER_SIZE)
@@ -121,50 +130,63 @@ class RTU:
                 atype = data['APCI'].Type
                 if msr is None: # STOPPED connection as shown in figure 17 from 60870-5-104 IEC:2006
                     if atype in [0x00, 0x01]: # I-frame (0x00) or S-frame (0x01)
-                        self.__log.write(f'Received an unexpected frame ({TYPE_APCI[atype]:s}) in "STOPPED connection" state. Terminating thread ...\r\n')
+                        self.log(f'Received an unexpected frame ({TYPE_APCI[atype]:s}) in "STOPPED connection" state. Terminating thread ...')
                         self.__terminate = True
                     elif atype == 0x03: # U-frame (0x03)
                         ut = data['APCI'].UType
                         if ut == 0x01: # STARTDT act
+                            self.log('Received a "STARTDT act" U-frame')
                             data = startdt(True) # STARTDT actcon
                         elif ut == 0x04: # STOPDT act
+                            self.log('Received a "STOPDT act" U-frame')
                             data = stopdt(True) # STOPDT actcon
                         else: # TESTFR act
+                            self.log('Received a "TESTFR act" U-frame')
                             data = testfr(True) # TESTFR actcon
                         # NOTE: If more than one bit is activated, it will be registered as a 'TESTFR act'
                         wsock.send(data)
                         if ut == 0x01: # Start the connection
-                            self.__startdt[connid] = True # Track the state of the current connection
-                            msr = Thread(target=self.__measure, kwargs={'wsock': wsock, 'connid': connid})
+                            self._RTU__startdt[connid] = True # Track the state of the current connection
+                            msr = Thread(target=self._RTU__measure, kwargs={'wsock': wsock, 'connid': connid})
+                            self.log('Start measuring data ...')
                             msr.start() # Start measuring
                 else: # STARTED connection as shown in figure 17 from 60870-5-104 IEC:2006
                     if atype == 0x03: # U-frame (0x03)
                         ut = data['APCI'].UType
                         if ut == 0x01: # STARTDT act
+                            self.log('Received a "STARTDT act" U-frame')
                             data = startdt(True) # STARTDT actcon
                         elif ut == 0x04: # STOPDT act
+                            self.log('Received a "STOPDT act" U-frame')
                             data = stopdt(True) # STOPDT actcon
-                            self.__startdt[connid] = False # Change measurement state
+                            self._RTU__startdt[connid] = False # Change measurement state
+                            self.log('Stop measusing data ...')
                             msr.join() # Stop measuring
                             msr = None
                         else: # TESTFR act
+                            self.log('Received a "TESTFR act" U-frame')
                             data = testfr(True) # TESTFR actcon
                         wsock.send(data)
                     elif atype == 0x01: # S-frame (0x01)
+                        self.log('Received an S-frame')
                         self.__tx = data['APCI'].Rx
                     else: # I-frame (0x00)
+                        self.log('Received an I-frame. Initiating handler ...')
                         self.__handle_iframe(wsock, data)
                 # NOTE: In this particular simulation, we are not considering the 'Pending UNCONFIRMED STOPPED connection' state, as our responses are faster
             except socket.timeout:
+                self.log('ERROR: T1 timeout')
                 self.__terminate = True # RTU T1 timeout => terminate connection
-                break
             except BrokenPipeError:
+                self.log('ERROR: Connection ended unexpectedly')
                 self.__terminate = True # Connection ended unexpectedly.
-                break
             except socket.error as e:
                 if e.errno != errno.ECONNRESET:
+                    self.log(f'ERROR: Unknown socket error: {e.errno:d}')
                     raise # Other unknown error
-                break
+                self.__terminate = True
+            except IndexError:
+                self.log('ERROR: Index error')
         if msr is not None: # The connection was still measuring
             self.__startdt[connid] = False # Change measurement state
             msr.join() # Stop measuring
@@ -174,21 +196,22 @@ class RTU:
 
     def loop(self):
         'This method handles the raw TCP listening socket, accepting new incoming connections.'
+        self.log(f'Listening for incoming connections ...')
         self.sock.settimeout(SOCK_TIMEOUT)
         self.sock.listen()
         threads = []
         while not self.terminate:
             try:
                 wsock, addr = self.sock.accept() # Accept a new connection
-                self.__log.write(f'Incoming connection from {str(addr):s}\r\n')
+                self.log(f'Incoming connection from {str(addr):s}')
                 if not self.__confok or len(threads) == 0:
                     wsock.settimeout(SOCK_TIMEOUT)
-                    self.__log.write(f'Creating state transition handler for {str(addr):s}\r\n')
+                    self.log(f'Creating state transition handler for {str(addr):s}')
                     t = Thread(target=self.__subloop, kwargs={'wsock': wsock}) # Create a state transition handler
                     threads.append(t) # Keep track of all the incoming connections
                     t.start() # Start the state transition handler for this new connection
                 else:
-                    self.__log.write(f'Connection from {str(addr):s} rejeected. only one connection allowed.\r\n')
+                    self.log(f'Connection from {str(addr):s} rejected. only one connection allowed.')
                     wsock.close()
             except socket.timeout:
                 pass
@@ -225,11 +248,13 @@ class Source(RTU):
     def __repr__(self):
         return 'Source RTU ({0:d}, {1:.2f})'.format(self.guid, self.__voltage)
 
-    def _rtu__measure(self, connid: int, wsock: socket.socket):
-        while self.startdt[connid]:
+    def _RTU__measure(self, connid: int, wsock: socket.socket):
+        self.log(f'Measurement thread started')
+        while self._RTU__startdt[connid]:
             if all(x is not None for x in [self.tx, self.rx]):
                 # ASDU Type 36: M_ME_TF_1
                 data = build_104_asdu_packet(36, self.guid, RTU_BASE_IOA, self.tx, self.rx, 3, value=self.__voltage)
+                self.log(f'Sending measured data: {repr(APDU(data))}')
                 self.tx += 1
                 if self.tx == 65536:
                     self.tx = 0
@@ -243,15 +268,18 @@ class Source(RTU):
                     break
             sleep(1)
     
-    def _rtu__handle_iframe(self, wsock, apdu):
+    def _RTU__handle_iframe(self, wsock, apdu):
         data = apdu
-        self.__rx += 1
-        self.__tx = apdu['APCI'].Rx
-        data['APCI'].Tx = self.__tx
-        self.__tx += 1
-        data['APCI'].Rx = self.__rx
+        self.rx += 1
+        self.tx = apdu['APCI'].Rx
+        data['APCI'].Tx = self.tx
+        self.tx += 1
+        data['APCI'].Rx = self.rx
         data['ASDU'].CauseTx = 45       # Cause of transmission: Unknown cause of transmission. A source RTU should not receive any commands.
         wsock.send(data)
+    
+    def loop(self):
+        super().loop()
 
 class Transmission(RTU):
 
@@ -358,64 +386,84 @@ class Transmission(RTU):
         if self.rx >= 65536:
             self.rx = 0
 
-    def _rtu__handle_iframe(self, wsock, apdu):
+    def _RTU__handle_iframe(self, wsock, apdu):
         try:
+            self.log(f'Handling {repr(apdu)} ...')
             asdu = apdu['ASDU']
             if asdu.TypeId == 45: # C_SC_NA_1 defined in section 7.3.2.1 of 60870-5-101 IEC:2003
+                self.log(f'Identified an type 45 ASDU (C_SC_NA_1) SELECT={asdu["IOA45"].SCO.SE} CTX={asdu.CauseTx}.')
                 self.__increment_counters(apdu['APCI'].Rx + 1, apdu['APCI'].Tx + 1)
-                if self.__wait_exec is None and asdu['IOA45'].SCO.SE == 0x80 and asdu.causeTx == 6: # SCO: Select; Cause of transmission: Activation
+                if self.__wait_exec is None and asdu['IOA45'].SCO.SE == 1 and asdu.CauseTx == 6: # SCO: Select; Cause of transmission: Activation
+                    self.log(f'Received a new C_SC_NA_1 (ASDU type 45) SELECT - Activation. Checking IOA ID ...')
                     if asdu['IOA45'].IOA in BREAKERS.keys():
+                        self.log(f'Received an appropriate new C_SC_NA_1 (ASDU type 45) SELECT - Activation')
                         self.__wait_exec = asdu['IOA45'].IOA
-                        data = build_104_asdu_packet(45, self.__guid, asdu['IOA45'].IOA, self.tx, self.rx, 7, SE=asdu.SCO.SE, QU=asdu.SCO.QU, SCS=asdu.SCO.SCS) # SCO: Select; Cause of transmission: Activation Confirmation
+                        data = build_104_asdu_packet(45, self.guid, asdu['IOA45'].IOA, self.tx, self.rx, 7, SE=asdu['IOA45'].SCO.SE, QU=asdu['IOA45'].SCO.QU, SCS=asdu['IOA45'].SCO.SCS) # SCO: Select; Cause of transmission: Activation Confirmation
                     else:
-                        data = build_104_asdu_packet(45, self.__guid, asdu['IOA45'].IOA, self.tx, self.rx, 47, SE=asdu.SCO.SE, QU=asdu.SCO.QU, SCS=asdu.SCO.SCS) # SCO: Select; Cause of transmission: Unknown information object address
-                elif self.__wait_exec is not None and asdu['IOA45'].SCO.SE == 0x00 and asdu.causeTx == 6: # SCO: Execute; Cause of transmission: Activation
+                        self.log(f'''WARNING: Received a new C_SC_NA_1 (ASDU type 45) SELECT - Activation with an unknown IOA: {asdu['IOA45'].IOA}''')
+                        data = build_104_asdu_packet(45, self.guid, asdu['IOA45'].IOA, self.tx, self.rx, 47, SE=asdu['IOA45'].SCO.SE, QU=asdu['IOA45'].SCO.QU, SCS=asdu['IOA45'].SCO.SCS) # SCO: Select; Cause of transmission: Unknown information object address
+                elif self.__wait_exec is not None and asdu['IOA45'].SCO.SE == 0x00 and asdu.CauseTx == 6: # SCO: Execute; Cause of transmission: Activation
                     if self.__wait_exec == asdu['IOA45'].IOA:
-                        data = build_104_asdu_packet(45, self.__guid, asdu['IOA45'].IOA, self.tx, self.rx, 7, SE=asdu.SCO.SE, QU=asdu.SCO.QU, SCS=asdu.SCO.SCS) # SCO: Execute; Cause of transmission: Activation Confirmation
+                        self.log(f'''Received a new C_SC_NA_1 (ASDU type 45) EXECUTE - Activation''')
+                        data = build_104_asdu_packet(45, self.guid, asdu['IOA45'].IOA, self.tx, self.rx, 7, SE=asdu['IOA45'].SCO.SE, QU=asdu['IOA45'].SCO.QU, SCS=asdu['IOA45'].SCO.SCS) # SCO: Execute; Cause of transmission: Activation Confirmation
                         if bool(asdu['IOA45'].SCO.SCS):
                             self.__state = self.__state | BREAKERS[self.__wait_exec] # STATE OR IOA
                         else: 
                             self.__state = self.__state & (BREAKERS[self.__wait_exec] ^ ((2 ** RTU_NUM_BREAKERS) - 1)) # STATE AND (IOA XOR 1...11)
                     else:
-                        data = build_104_asdu_packet(45, self.__guid, asdu['IOA45'].IOA, self.tx, self.rx, 47, SE=asdu.SCO.SE, QU=asdu.SCO.QU, SCS=asdu.SCO.SCS) # SCO: Execute; Cause of transmission: Unknown information object address
-                elif self.__wait_exec is not None and asdu['IOA45'].SCO.SE == 0x80 and asdu.causeTx == 8: # SCO: Select; Cause of transmission: Deactivation
-                    data = build_104_asdu_packet(45, self.__guid, asdu['IOA45'].IOA, self.tx, self.rx, 9, SE=asdu.SCO.SE, QU=asdu.SCO.QU, SCS=asdu.SCO.SCS) # SCO: Select; Cause of transmission: Deactivation Confirmation
+                        self.log(f'''WARNING: Received a new C_SC_NA_1 (ASDU type 45) EXECUTE - Activation for an unexpected IOA: {asdu['IOA45'].IOA}''')
+                        data = build_104_asdu_packet(45, self.guid, asdu['IOA45'].IOA, self.tx, self.rx, 47, SE=asdu['IOA45'].SCO.SE, QU=asdu['IOA45'].SCO.QU, SCS=asdu['IOA45'].SCO.SCS) # SCO: Execute; Cause of transmission: Unknown information object address
+                elif self.__wait_exec is not None and asdu['IOA45'].SCO.SE == 1 and asdu.CauseTx == 8: # SCO: Select; Cause of transmission: Deactivation
+                    self.log(f'''Received a new C_SC_NA_1 (ASDU type 45) SELECT - Deactivation''')
+                    data = build_104_asdu_packet(45, self.guid, asdu['IOA45'].IOA, self.tx, self.rx, 9, SE=asdu['IOA45'].SCO.SE, QU=asdu['IOA45'].SCO.QU, SCS=asdu['IOA45'].SCO.SCS) # SCO: Select; Cause of transmission: Deactivation Confirmation
                     self.__wait_exec = None
                 else:
+                    self.log(f'''WARNING: Received an unexpected C_SC_NA_1 (ASDU type 45) EXECUTE''')
                     data = apdu
-                    data['APCI'].Rx = self.__rx
-                    data['APCI'].Tx = self.__tx
+                    data['APCI'].Rx = self.rx
+                    data['APCI'].Tx = self.tx
                     data['ASDU'].CauseTx = 45 # Cause of transmission: Unknown cause of transmission
+                    data = data.build()
             else:
+                self.log(f'''WARNING: Received an unexpected ASDU (type {asdu.TypeId}''')
                 data = apdu
-                data['APCI'].Rx = self.__rx
-                data['APCI'].Tx = self.__tx
+                data['APCI'].Rx = self.rx
+                data['APCI'].Tx = self.tx
                 data['ASDU'].CauseTx = 45 # Cause of transmission: Unknown cause of transmission
+                data = data.build()
+            self.log(f'Sending I-frame response: {repr(APDU(data))}')
             wsock.send(data)
         except socket.timeout:
+            self.log('T1 timeout')
             self.terminate =  True
         except BrokenPipeError:
             pass
         except socket.error as e:
             if e.errno != errno.ECONNRESET:
                 raise
+        except IndexError as e:
+            self.log(f'IndexError: {str(e)}')
     
-    def _rtu__measure(self, wsock: socket.socket, connid:int):
-        while self.startdt[connid]:
+    def _RTU__measure(self, wsock: socket.socket, connid:int):
+        while self._RTU__startdt[connid]:
             if all(x is not None for x in [self.tx, self.rx]):
                 try:
+                    self.log(f'Sending measured input voltage ...')
                     data = build_104_asdu_packet(36, self.guid, RTU_BASE_IOA, self.tx, self.rx, 3, value=self.__vin)
                     self.tx += 1
                     if self.tx == 65536:
                         self.tx = 0
                     wsock.send(data)
+                    self.log(f'Sending measured current ...')
                     data = build_104_asdu_packet(36, self.guid, RTU_BASE_IOA + 1, self.tx, self.rx, 3, value=self.__amp)
                     self.tx += 1
                     if self.tx == 65536:
                         self.tx = 0
                     wsock.send(data)
+                    self.log(f'Sending breaker states ... ')
                     for i in range(len(self.__loads)):
-                        data = build_104_asdu_packet(3, self.guid, RTU_BREAKER_BASE + i, self.tx, self.rx, 3, value=(self.__state & BREAKERS[i]) // BREAKERS[i])
+                        data = build_104_asdu_packet(3, self.guid, RTU_BREAKER_BASE + i, self.tx, self.rx, 3, value=int(0x01 if ((self.__state & BREAKERS[RTU_BREAKER_BASE + i]) > 0) else 0x02))
+                        self.log(f'Sending breaker {RTU_BREAKER_BASE + i}: {repr(APDU(data))}')
                         self.tx += 1
                         if self.tx == 65536:
                             self.tx = 0
@@ -426,6 +474,8 @@ class Transmission(RTU):
                     if e.errno != errno.ECONNRESET:
                         raise
                     break
+                except Exception as e:
+                    self.log(str(e))
             sleep(1)
     
 class Load(RTU):
@@ -469,16 +519,18 @@ class Load(RTU):
     def __repr__(self):
         return 'Load RTU ({0:d}, {1:.2f})'.format(self.guid, self.__load)
 
-    def _rtu__measure(self, wsock: socket.socket, connid:int):
-        while self.startdt[connid]:
+    def _RTU__measure(self, wsock: socket.socket, connid:int):
+        while self._RTU__startdt[connid]:
             if all(x is not None for x in [self.tx, self.rx]):
                 try:
                     data = build_104_asdu_packet(36, self.guid, RTU_BASE_IOA, self.tx, self.rx, 3, value=self.__vin)
+                    self.log(f'Sending measured voltage ... {repr(APDU(data))}')
                     self.tx += 1
                     if self.tx == 65536:
                         self.tx = 0
                     wsock.send(data)
                     data = build_104_asdu_packet(36, self.guid, RTU_BASE_IOA + 1, self.tx, self.rx, 3, value=self.__amp)
+                    self.log(f'Sending measured current ... {repr(APDU(data))}')
                     self.tx += 1
                     if self.tx == 65536:
                         self.tx = 0
@@ -491,12 +543,12 @@ class Load(RTU):
                     break
             sleep(1)
     
-    def _rtu__handle_iframe(self, wsock, apdu):
-        self.__rx += 1
-        self.__tx = apdu['APCI'].Rx
+    def _RTU__handle_iframe(self, wsock, apdu):
+        self.rx += 1
+        self.tx = apdu['APCI'].Rx
         data = apdu
-        data['APCI'].Tx = self.__tx
-        self.__tx += 1
-        data['APCI'].Rx = self.__rx
+        data['APCI'].Tx = self.tx
+        self.tx += 1
+        data['APCI'].Rx = self.rx
         data['ASDU'].CauseTx = 45
         wsock.send(data)

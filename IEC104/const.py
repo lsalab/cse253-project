@@ -104,7 +104,8 @@ DOW_ENUM = {
 
 SEL_EXEC = {
     0x00: 'Execute',
-    0x80: 'Select'
+    0x80: 'Select',
+    0x01: 'Select',
 }
 
 DPI_ENUM = {

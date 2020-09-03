@@ -14,14 +14,14 @@ if __name__ == '__main__':
     srtu = Transmission(
         guid=int(sys.argv[1]),
         type=RTU_TRANSMISSION,
-        state=7,
+        state=0,
         loads = [0.394737, 0.394737, 0.394737],
         left=int(sys.argv[2]),
         right=int(sys.argv[3]),
         confok=False
     )
     hrtu = SimulationHandler(srtu)
-    def catch_sigterm():
+    def catch_sigterm(s, e):
         global hrtu
         global srtu
         hrtu.terminate = True

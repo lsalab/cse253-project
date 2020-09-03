@@ -13,7 +13,7 @@ if __name__ == '__main__':
         sys.exit()
     srtu = Source(guid=int(sys.argv[1]), type=RTU_SOURCE, voltage=526315.79)
     hrtu = SimulationHandler(srtu)
-    def catch_sigterm():
+    def catch_sigterm(s, e):
         global hrtu
         global srtu
         hrtu.terminate = True

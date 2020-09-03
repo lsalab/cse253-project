@@ -8,11 +8,11 @@ from datetime import datetime
 APDULEN = {
     3: 14,
     36: 25,
-    45: 4,
+    45: 14,
     50: 18,
 }
 
-def cp56time():
+def cp56time() -> CP56Time:
     now = datetime.now()
     ms = now.second*1000 + int(now.microsecond/1000)
     minu = now.minute
@@ -30,13 +30,18 @@ def build_104_asdu_packet(typeASDU: int, asdu:int, ioa: int, tx: int, rx: int, c
     pkt = APDU()
     pkt /= APCI(ApduLen=APDULEN[typeASDU], Type=0x00, Tx=tx, Rx=rx)
     if typeASDU == 3:
-        pkt /= ASDU(TypeId=typeASDU, SQ=0, NumIx=1, CauseTx=causeTx, Test=0, OA=0, Addr=asdu, IOA=IOA3(IOA=ioa, DIQ=DIQ(DPI=kwargs['value'], flags=0)))
+        pkt /= ASDU(TypeId=typeASDU, SQ=0, NumIx=1, CauseTx=causeTx, Test=0, OA=0, Addr=asdu, IOA=[IOA3(IOA=ioa, DIQ=DIQ(DPI=kwargs['value'], flags=0))])
     elif typeASDU == 36:
-        pkt /= ASDU(TypeId=typeASDU, SQ=0, NumIx=1, CauseTx=causeTx, Test=0, OA=0, Addr=asdu, IOA=IOA36(IOA=ioa, Value=kwargs['value'], QDS=0, CP56Time=cp56time()))
+        ct = cp56time()
+        pkt /= ASDU(TypeId=typeASDU, SQ=0, NumIx=1, CauseTx=causeTx, Test=0, OA=0, Addr=asdu, IOA=[IOA36(IOA=ioa, Value=kwargs['value'], QDS=0x00, CP56Time=ct)])
     elif typeASDU == 45:
-        pkt /= ASDU(TypeId=typeASDU, SQ=0, NumIx=1, CauseTx=causeTx, Test=0, OA=0, Addr=asdu, IOA=IOA45(IOA=ioa, SCO=SCO(SE=kwargs['SE'], QU=kwargs['QU'], SCS=kwargs['SCS'])))
+        pkt /= ASDU(TypeId=typeASDU, SQ=0, NumIx=1, CauseTx=causeTx, Test=0, OA=0, Addr=asdu, IOA=[IOA45(IOA=ioa, SCO=SCO(SE=kwargs['SE'], QU=kwargs['QU'], SCS=kwargs['SCS']))])
     elif typeASDU == 50:
-        pkt /= ASDU(TypeId=typeASDU, SQ=0, NumIx=1, CauseTx=causeTx, Test=0, OA=0, Addr=asdu, IOA=IOA50(IOA=ioa, Value=kwargs['value'], QOS=QOS(QL=0, SE=0)))
+        pkt /= ASDU(TypeId=typeASDU, SQ=0, NumIx=1, CauseTx=causeTx, Test=0, OA=0, Addr=asdu, IOA=[IOA50(IOA=ioa, Value=kwargs['value'], QOS=QOS(QL=0, SE=0))])
+    else:
+        raise AttributeError
+    if __name__ == '__main__':
+        pkt.show()
     return pkt.build()
 
 def extract_104_value(pkt: APDU) -> dict:
@@ -66,16 +71,19 @@ def extract_104_value(pkt: APDU) -> dict:
     'rx':rx,
     'value':value}
 
-def startdt(actcon:bool=False):
-    return APDU()/APCI(ApduLen=4, Type=0x03, UType=0x01 << int(actcon))
+def startdt(actcon:bool=False) -> bytes:
+    pkt =  APDU()/APCI(ApduLen=4, Type=0x03, UType=0x01 << int(actcon))
+    return pkt.build()
 
-def stopdt(actcon:bool=False):
-    return APDU()/APCI(ApduLen=4, Type=0x03, UType=0x04 << int(actcon))
+def stopdt(actcon:bool=False) -> bytes:
+    pkt = APDU()/APCI(ApduLen=4, Type=0x03, UType=0x04 << int(actcon))
+    return pkt.build()
 
-def testfr(actcon:bool=False):
-    return APDU()/APCI(ApduLen=4, Type=0x03, UType=0x10 << int(actcon))
+def testfr(actcon:bool=False) -> bytes:
+    pkt = APDU()/APCI(ApduLen=4, Type=0x03, UType=0x10 << int(actcon))
+    return pkt.build()
 
 if __name__ == '__main__':
-    print(build_104_asdu_packet(3, 1, 1003, 4, 3, 1, value=67.2))
+    print(build_104_asdu_packet(3, 1, 1003, 4, 3, 1, value=67))
     print(build_104_asdu_packet(36, 2, 101, 4, 7, 1, value=54.3))
     print(build_104_asdu_packet(45, 3, 123, 2, 5, 1, SE=1, QU=1, SCS=0))

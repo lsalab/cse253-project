@@ -81,7 +81,8 @@ class SCADACLI(Cmd):
                                 value = 1
                         self.__rtu_data[k]['ioas'][data['ioa']] = value
                     elif asdu.TypeId == 45: # Single command
-                        if self.__rtu_i_state[k] is not None and self.__rtu_i_state[k] == ((asdu['IOA45'].CauseTx << 8) | asdu['IOA45'].SCO.SE): # Expected single command response
+                        print(f'''Received: {((asdu.CauseTx << 8) | (asdu['IOA45'].SCO.SE << 7) | asdu['IOA45'].SCO.SCS):04x} Expected: {self.__rtu_i_state[k]:04x}''')
+                        if self.__rtu_i_state[k] is not None and self.__rtu_i_state[k] == ((asdu.CauseTx << 8) | (asdu['IOA45'].SCO.SE << 7) | asdu['IOA45'].SCO.SCS): # Expected single command response
                             self.__rtu_i_state[k] = 0x0000
                         else: # Unexpected single command response => Alert user.
                             self.__rtu_i_state[k] = None
@@ -157,7 +158,7 @@ class SCADACLI(Cmd):
             self.__rtu_u_state[rtuaddr] = 0x08 # Expect STOPDT con
             pkt = APDU()/APCI(ApduLen=4, Type=0x03, UType=0x04) # STOPDT act
             self.__rtu_comms[rtuaddr].send(pkt.build())
-            while self.__rtu_u_state[rtuaddr] is not None and self.__rtu_u_state > 0:
+            while self.__rtu_u_state[rtuaddr] is not None and self.__rtu_u_state[rtuaddr] > 0:
                 print(f'\rTerminating connection with {rtuaddr:s} ... ', end='')
                 sleep(0.33)
             print('')
@@ -182,7 +183,8 @@ class SCADACLI(Cmd):
                     breakers.append(str(i))
             if len(breakers) > 0:
                 ioa = int(runprompt(listq(message='Send command to which IOA?', choices=breakers)))
-                status = int(self.__rtu_data[rtuaddr]['ioas'][ioa])
+                status = int(self.__rtu_data[rtuaddr]['ioas'][ioa]) >> 1
+                print(f"{self.__rtu_data[rtuaddr]['ioas']} {status}")
                 if status == 0:
                     print('The last known state is CLOSED')
                     ans = runprompt(listq(message='Would you like to OPEN this IOA?', choices=['Yes', 'No']))
@@ -190,22 +192,22 @@ class SCADACLI(Cmd):
                     print('The last known state is OPEN')
                     ans = runprompt(listq(message='Would you like to CLOSE this IOA?', choices=['Yes', 'No']))
                 if ans == 'Yes':
-                    status = status ^ 0x1
+                    status = 1 if status > 0 else 2
                     self.__rtu_data[rtuaddr]['tx'] += 1
-                    self.__rtu_u_state[rtuaddr] = (0x07 << 8) | 0x80 | status
-                    pkt = build_104_asdu_packet(45, self.__rtu_asdu[rtuaddr], ioa, self.__rtu_data[rtuaddr]['tx'], self.__rtu_data[rtuaddr]['rx'], 6, SE=0x80, QU=0x01, SCS=status)
+                    self.__rtu_i_state[rtuaddr] = (0x07 << 8) | 0x80 | status
+                    pkt = build_104_asdu_packet(45, self.__rtu_asdu[rtuaddr], ioa, self.__rtu_data[rtuaddr]['tx'], self.__rtu_data[rtuaddr]['rx'], 6, SE=1, QU=1, SCS=status)
                     self.__rtu_comms[rtuaddr].send(pkt)
-                    while self.__rtu_u_state[rtuaddr] is not None and self.__rtu_u_state[rtuaddr] > 0:
-                        print(f'\rSending single command (SELECT) to {rtuaddr:s} ... ')
+                    while self.__rtu_i_state[rtuaddr] is not None and self.__rtu_i_state[rtuaddr] > 0:
+                        print(f'\rSending single command (SELECT) to {rtuaddr:s} ... ', end='')
                         sleep(0.25)
                     print('')
-                    if self.__rtu_u_state[rtuaddr] is None:
+                    if self.__rtu_i_state[rtuaddr] is None:
                         print(f'Error sending command to {rtuaddr:s}')
                     else:
-                        self.__rtu_u_state[rtuaddr] = (0x07 << 8) | status
-                        pkt = build_104_asdu_packet(45, self.__rtu_asdu[rtuaddr], ioa, self.__rtu_data[rtuaddr]['tx'], self.__rtu_data[rtuaddr]['rx'], 6, SE=0x00, QU=0x01, SCS=status)
+                        self.__rtu_i_state[rtuaddr] = (0x07 << 8) | status
+                        pkt = build_104_asdu_packet(45, self.__rtu_asdu[rtuaddr], ioa, self.__rtu_data[rtuaddr]['tx'], self.__rtu_data[rtuaddr]['rx'], 6, SE=0, QU=1, SCS=status)
                         self.__rtu_comms[rtuaddr].send(pkt)
-                        while self.__rtu_u_state[rtuaddr] is not None and self.__rtu_u_state[rtuaddr] > 0:
+                        while self.__rtu_i_state[rtuaddr] is not None and self.__rtu_i_state[rtuaddr] > 0:
                             print(f'\rSending single command (EXECUTE) to {rtuaddr:s} ... ')
                             sleep(0.25)
                         print('')
@@ -236,7 +238,7 @@ class SCADACLI(Cmd):
                 if IOAS[k][0] is not 'Breaker':
                     print('Value: {0:5.12f} {1:s}'.format(value, IOAS[k][1]))
                 else:
-                    value = 'OPEN' if value == 0 else 'CLOSED'
+                    value = 'CLOSED' if value == 0 else 'OPEN'
                     print('Value: %s' % value)
             print('='*40 + '\r\n')
         else:
