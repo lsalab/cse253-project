@@ -92,7 +92,7 @@ class APCI(Packet):
         XByteField('START', 0x68),
         ByteField('ApduLen', 4),
         ByteEnumField('Type', 0x00, TYPE_APCI),
-        ConditionalField(XByteField('UType', 0x01), lambda pkt: pkt.Type == 0x03),
+        ConditionalField(XByteField('UType', None), lambda pkt: pkt.Type == 0x03),
         ConditionalField(ShortField('Tx', 0x00), lambda pkt: pkt.Type == 0x00),
         ConditionalField(ShortField('Rx', 0x00), lambda pkt: pkt.Type < 3),
     ]
