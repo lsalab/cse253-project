@@ -6,6 +6,7 @@ from netaddr import valid_ipv4, IPNetwork
 from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, SO_REUSEADDR, SO_BROADCAST, SOL_SOCKET
 from threading import Thread
 from collections import deque
+from datetime import datetime
 from time import sleep
 
 if sys.platform not in ['win32']:
@@ -13,7 +14,7 @@ if sys.platform not in ['win32']:
 
 # NEFICS imports
 import nefics.simproto as simproto
-from nefics.IEC104.dissector import APDU
+from nefics.IEC104.ioa import CP56Time
 
 # Try to determine the main broadcast address
 try:
@@ -31,19 +32,39 @@ except IndexError:
 
 BUFFER_SIZE = 512
 
+def cp56time() -> CP56Time:
+    now = datetime.now()
+    ms = now.second*1000 + int(now.microsecond/1000)
+    minu = now.minute
+    iv = 0
+    hour = now.hour
+    su = 0
+    day = now.day
+    dow = now.today().weekday() + 1
+    month = now.month
+    year = now.year - 2000
+    output = CP56Time(MS = ms, Min = minu, IV = iv, Hour = hour, SU = su, Day = day, DOW = dow, Month = month, Year = year)
+    return output
+
 class IEDBase(Thread):
     '''
     Main device class.
     
     All additional devices must extend from this class.
+
+    If a device requires additional arguments, use kwargs to
+    extract any additional values.
     '''
 
-    def __init__(self, guid: int, neighbors_in: list=list(), neighbors_out: list=list()):
+    def __init__(self, guid: int, neighbors_in: list=list(), neighbors_out: list=list(), **kwargs):
         assert all(val is not None for val in [guid, neighbors_in, neighbors_out])
+        assert all(isinstance(val, int) for val in neighbors_in + neighbors_out)
         self._guid = guid
         self._terminate = False
-        self._n_in_addr = {n: None for n in neighbors_in}
-        self._n_out_addr = {n: None for n in neighbors_out}
+        self._n_in_addr = {n: None for n in neighbors_in}                       # IDs of neighbors this device depends on
+        self._n_out_addr = {n: None for n in neighbors_out}                     # IDs of neighbors depending on this device
+        self._tx = 0                                                            # IEC104 Transmission counter
+        self._rx = 0                                                            # IEC104 Reception counter
         self._sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)                   # Use UDP
         if sys.platform not in ['win32']:
             self._sock.setsockopt(SOL_SOCKET, SO_REUSEPORT, 1)                  # Enable port reusage (unix systems)
@@ -70,13 +91,32 @@ class IEDBase(Thread):
     def terminate(self, value: bool):
         assert value is not None
         self._terminate = value
+    
+    @property
+    def rx(self) -> int:
+        return self._rx
+    
+    @rx.setter
+    def rx(self, value: int):
+        self._rx = 0 if value < 0 or value > 0xffff else value
+    
+    @property
+    def tx(self) -> int:
+        return self._tx
+    
+    @tx.setter
+    def tx(self, value: int):
+        self._tx = 0 if value < 0 or value > 0xffff else value
 
-    def reply_IEC104(self, request: APDU) -> APDU:
+    def poll_values_IEC104(self) -> list:
         '''
-        Override this method to reply the appropriate values of
+        Override this method to return the appropriate values of
         IEC104 according to the device's functionality.
+
+        This method must return a list comprised of
+        nefics.IEC104.APDU objects.
         '''
-        return None
+        return []
 
     def simulate(self):
         '''
