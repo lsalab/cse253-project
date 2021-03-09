@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import io
 from netifaces import gateways, ifaddresses
 from netaddr import valid_ipv4, IPNetwork
 from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, SO_REUSEADDR, SO_BROADCAST, SOL_SOCKET
@@ -14,6 +15,7 @@ if sys.platform not in ['win32']:
 
 # NEFICS imports
 import nefics.simproto as simproto
+from nefics.IEC104.dissector import APDU
 from nefics.IEC104.ioa import CP56Time
 
 # Try to determine the main broadcast address
@@ -31,6 +33,18 @@ except IndexError:
 
 
 BUFFER_SIZE = 512
+LOG_PRIO = {
+    'CRITICAL': 0,
+    'ERROR': 1,
+    'WARNING': 2,
+    'INFO': 3,
+    'DEBUG': 4,
+    0: 'CRITICAL',
+    1: 'ERROR',
+    2: 'WARNING',
+    3: 'INFO',
+    4: 'DEBUG'
+}
 
 def cp56time() -> CP56Time:
     now = datetime.now()
@@ -73,6 +87,10 @@ class IEDBase(Thread):
         self._sock.bind(('', simproto.SIM_PORT))                                # Bind to simulation port on all addresses
         self._sock.settimeout(0.333)                                            # Set socket timeout (seconds)
         self._msgqueue = deque(maxlen=simproto.QUEUE_SIZE//simproto.DATA_LEN)   # Simulation message queue (64KB)
+        if 'log' in kwargs.keys() and isinstance(kwargs['log'], io.TextIOBase):
+            self._logfile = kwargs['log']
+        else:
+            self._logfile = None
     
     @property
     def guid(self) -> int:
@@ -117,6 +135,13 @@ class IEDBase(Thread):
         nefics.IEC104.APDU objects.
         '''
         return []
+    
+    def handle_IEC104_IFrame(self, packet: APDU) -> APDU:
+        '''
+        Override this method to return the appropriate APDU for the
+        received I-Frame according to the device's functionality.
+        '''
+        return None
 
     def simulate(self):
         '''
@@ -190,6 +215,8 @@ class IEDBase(Thread):
                             self._n_in_addr[nid] = m_addr
                         if nid in self._n_out_addr and self._n_out_addr[nid] is None:
                             self._n_out_addr[nid] = m_addr
+                    elif next_msg.MessageID in [simproto.MESSAGE_ID['MSG_NRDY'], simproto.MESSAGE_ID['MSG_UKWN']]:
+                        continue
                     else:
                         self.handle_specific(next_msg)
             else:
@@ -213,6 +240,17 @@ class IEDBase(Thread):
                 )
                 self._sock.sendto(pkt.build(), (SIM_BCAST, simproto.SIM_PORT))
             sleep(0.333)
+
+    def _log(self, message:str, prio:int=LOG_PRIO['INFO']):
+        if self._logfile is not None and isinstance(self._logfile, io.TextIOBase):
+            line = datetime.now().ctime()
+            line += f'\t[{LOG_PRIO[prio]}] :: {message.replace("\n", "").replace("\r","")}\r\n'
+            try:
+                self._logfile.write(line)
+                self._logfile.flush()
+            except IOError:
+                sys.stderr.write(f'{line[:-2]} -- IOError\r\n')
+                sys.stderr.flush()
 
     def run(self):
         msghandler = Thread(target=self.msg_handler)
