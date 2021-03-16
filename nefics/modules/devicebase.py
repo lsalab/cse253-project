@@ -4,7 +4,7 @@ import sys
 import io
 from netifaces import gateways, ifaddresses
 from netaddr import valid_ipv4, IPNetwork
-from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, SO_REUSEADDR, SO_BROADCAST, SOL_SOCKET
+from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, SO_REUSEADDR, SO_BROADCAST, SOL_SOCKET, timeout
 from threading import Thread
 from collections import deque
 from datetime import datetime
@@ -26,7 +26,7 @@ try:
         if valid_ipv4(a[0]['addr']):
             ipnet = IPNetwork(f'{a[0]["addr"]}/{a[0]["netmask"]}')
             break
-    SIM_BCAST = ipnet.broadcast
+    SIM_BCAST = str(ipnet.broadcast)
 except IndexError:
     print('ERROR: Could not determine default broadcast address')
     sys.exit(1)
@@ -75,6 +75,7 @@ class IEDBase(Thread):
         assert all(isinstance(val, int) for val in neighbors_in + neighbors_out)
         assert all(val not in neighbors_in for val in neighbors_out)
         assert all(val not in neighbors_out for val in neighbors_in)
+        super().__init__()
         self._guid = guid
         self._terminate = False
         self._n_in_addr = {n: None for n in neighbors_in}                       # IDs of neighbors this device depends on
@@ -127,6 +128,14 @@ class IEDBase(Thread):
     @tx.setter
     def tx(self, value: int):
         self._tx = 0 if value < 0 or value > 0xffff else value
+    
+    @property
+    def logfile(self) -> io.TextIOBase:
+        return self._logfile
+    
+    @logfile.setter
+    def logfile(self, value: io.TextIOBase):
+        self._logfile = value
 
     def poll_values_IEC104(self) -> list:
         '''
@@ -163,7 +172,7 @@ class IEDBase(Thread):
         simulate method in a loop until the self._terminate boolean
         is set.
         '''
-        while any(x is None for x in self._n_in_addr.values() + self._n_out_addr.values()) and not self._terminate:
+        while any(x is None for x in list(self._n_in_addr.values()) + list(self._n_out_addr.values())) and not self._terminate:
             sleep(1)
         while not self._terminate:
             self.simulate()
@@ -233,10 +242,10 @@ class IEDBase(Thread):
         address of every neighbor, or the self._terminate boolean
         value is set.
         '''
-        while not self._terminate and any(x is None for x in self._n_in_addr.values() + self._n_out_addr.value()):
+        while not self._terminate and any(x is None for x in list(self._n_in_addr.values()) + list(self._n_out_addr.values())):
             for nid in [x for x in self._n_in_addr.keys() if self._n_in_addr[x] is None] + [x for x in self._n_out_addr.keys() if self._n_out_addr[x] is None]:
                 pkt = simproto.NEFICSMSG(
-                    SenderID=self.guid,
+                    SenderID=self._guid,
                     ReceiverID=nid,
                     MessageID=simproto.MESSAGE_ID['MSG_WERE']
                 )
@@ -246,7 +255,8 @@ class IEDBase(Thread):
     def _log(self, message:str, prio:int=LOG_PRIO['INFO']):
         if self._logfile is not None and isinstance(self._logfile, io.TextIOBase):
             line = datetime.now().ctime()
-            line += f'\t[{LOG_PRIO[prio]}] :: {message.replace("\n", "").replace("\r","")}\r\n'
+            msg = message.replace("\n", "").replace("\r","")
+            line += f'\t[{LOG_PRIO[prio]}] :: {msg}\r\n'
             try:
                 self._logfile.write(line)
                 self._logfile.flush()
@@ -263,10 +273,10 @@ class IEDBase(Thread):
         simhandler.start()
         while not self._terminate: # Receive incomming messages and add them to the message queue
             try:
-                msgdata, msgfrom = self._sock.recvfrom(bufsize=BUFFER_SIZE)
+                msgdata, msgfrom = self._sock.recvfrom(BUFFER_SIZE)
                 msgdata = simproto.NEFICSMSG(msgdata)
                 self._msgqueue.append([msgfrom, msgdata])
-            except socket.timeout:
+            except timeout:
                 pass
         simhandler.join()
         identify.join()

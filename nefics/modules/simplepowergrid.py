@@ -46,6 +46,9 @@ class Source(devicebase.IEDBase):
         super().__init__(guid, neighbors_in=[], neighbors_out=neighbors_out[:1], **kwargs)
         self._voltage = kwargs['voltage']
     
+    def __str__(self) -> str:
+        return f'Vout: {self._voltage:6.3f} V\r\n'
+    
     def handle_specific(self, message: simproto.NEFICSMSG):
         if message.SenderID in self._n_out_addr.keys():
             addr = self._n_out_addr[message.SenderID]
@@ -119,6 +122,9 @@ class Transmission(devicebase.IEDBase):
         self._rload = None
         self._wait_exec = None
     
+    def __str__(self) -> str:
+        return f'Vin:  {self._vin:6.3f} V\r\nVout: {self._vout:6.3f} V\r\nI:    {self._amp:6.3f} A\r\nR:    {self._load:6.3f} Ohm\r\nLoad: {self._rload:6.3f} Ohm\r\n'
+
     def handle_specific(self, message: simproto.NEFICSMSG):
         if message.SenderID in list(self._n_in_addr.keys()) + list(self._n_out_addr.keys()):
             addr = self._n_in_addr[message.SenderID] if message.SenderID in self._n_in_addr.keys() else self._n_out_addr[message.SenderID]
@@ -305,7 +311,7 @@ class Load(devicebase.IEDBase):
 
     def __init__(self, guid: int, neighbors_in: list, neighbors_out: list, **kwargs):
         assert all(val is not None for val in [guid, neighbors_in])
-        assert all(isinstance(val int) for val in neighbors_in)
+        assert all(isinstance(val, int) for val in neighbors_in)
         assert len(neighbors_in) >= 1
         assert 'load' in kwargs.keys()
         assert isinstance(kwargs['load'], float)
@@ -314,6 +320,9 @@ class Load(devicebase.IEDBase):
         self._vin = None
         self._amp = None
     
+    def __str__(self) -> str:
+        return f'Vin:  {self._vin:6.3f} V\r\nR:    {self._load:6.3f} Ohm\r\n'
+
     @property
     def load(self) -> float:
         return self._load
