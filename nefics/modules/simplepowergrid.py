@@ -43,10 +43,10 @@ class Source(devicebase.IEDBase):
         assert len(neighbors_out) >= 1
         assert 'voltage' in kwargs.keys()
         assert isinstance(kwargs['voltage'], float)
-        super().__init__(guid, neighbors_in=[], neighbors_out=neighbors_out[:1])
+        super().__init__(guid, neighbors_in=[], neighbors_out=neighbors_out[:1], **kwargs)
         self._voltage = kwargs['voltage']
     
-    def handle_specific(self, message):
+    def handle_specific(self, message: simproto.NEFICSMSG):
         if message.SenderID in self._n_out_addr.keys():
             addr = self._n_out_addr[message.SenderID]
             if addr is not None:
@@ -74,11 +74,27 @@ class Source(devicebase.IEDBase):
         self.tx += 1
         return [pkt]
 
+    def handle_IEC104_IFrame(self, packet: APDU) -> APDU:
+        # A source device shouldn't receive any I-Frames
+        assert packet.haslayer('APCI')
+        assert packet.haslayer('ASDU')
+        apci:APCI = packet['APCI']
+        self.tx = apci.Tx + 1
+        self.rx = apci.Rx + 1
+        response:APDU = packet
+        response['APCI'].Rx = self.rx
+        response['APCI'].Tx = self.tx
+        response['ASDU'].CauseTx = 45 # Unknown CoT
+        return response
+
 class Transmission(devicebase.IEDBase):
     '''
     Transmission substation device.
 
     Emulates the behavior of a simple IED in a substation.
+
+    The value polling returns two type 36 (M_ME_TF_1) ASDU containing the voltage and current values,
+    and several type 3 (M_DP_NA_1) containing the status of each configured breaker.
     '''
 
     def __init__(self, guid: int, neighbors_in: list, neighbors_out: list, **kwargs):
@@ -276,4 +292,112 @@ class Transmission(devicebase.IEDBase):
             response['APCI'].Rx = self.rx
             response['APCI'].Tx = self.tx
             response['ASDU'].CauseTx = 45 # Unknown CoT
+        return response
+
+class Load(devicebase.IEDBase):
+    '''
+    Load device.
+
+    Only needs to reply with the load it represents on the system.
+
+    It can only have one input neighbor.
+    '''
+
+    def __init__(self, guid: int, neighbors_in: list, neighbors_out: list, **kwargs):
+        assert all(val is not None for val in [guid, neighbors_in])
+        assert all(isinstance(val int) for val in neighbors_in)
+        assert len(neighbors_in) >= 1
+        assert 'load' in kwargs.keys()
+        assert isinstance(kwargs['load'], float)
+        super().__init__(guid, neighbors_in=neighbors_in[:1], neighbors_out=[], **kwargs)
+        self._load = kwargs['load']
+        self._vin = None
+        self._amp = None
+    
+    @property
+    def load(self) -> float:
+        return self._load
+    
+    @load.setter
+    def load(self, value: float):
+        self._load = value if value >= 0 else self._load
+        # A zero-valued load represents a failure
+
+    def handle_specific(self, message: simproto.NEFICSMSG):
+        if message.SenderID in self._n_in_addr.keys():
+            addr = self._n_out_addr[message.SenderID]
+            if addr is not None:
+                if message.MessageID == simproto.MESSAGE_ID['MSG_GREQ']:
+                    pkt = simproto.NEFICSMSG(
+                        SenderID=self.guid,
+                        ReceiverID=message.SenderID,
+                        MessageID = simproto.MESSAGE_ID['MSG_TREQ'],
+                        FloatArg0 = self.load
+                    )
+                elif message.MessageID == simproto.MESSAGE_ID['MSG_VOLT']:
+                    pkt = None
+                    self._vin = message.FloatArg0
+                else:
+                    self._log(f'Received a NEFICS message not supported by simplepowergrid.Load from {addr}: {repr(message)}')
+                    pkt = simproto.NEFICSMSG(
+                        SenderID=self.guid,
+                        ReceiverID=message.SenderID,
+                        MessageID=simproto.MESSAGE_ID['MSG_UKWN']
+                    )
+                if pkt is not None:
+                    self._sock.sendto(pkt.build(), addr)
+    
+    def simulate(self):
+        if all(x is not None for x in self._n_in_addr.values()):
+            # Request input voltage to neighbor
+            dstid = list(self._n_in_addr.keys())[0]
+            addr = self._n_in_addr[dstid]
+            pkt = simproto.NEFICSMSG(
+                SenderID=self.guid,
+                ReceiverID=dstid,
+                MessageID=simproto.MESSAGE_ID['MSG_GETV']
+            )
+            self._sock.sendto(pkt.build(), addr)
+            sleep(0.5)
+        if self.load == float('inf'):
+            # Failure condition - Open circuit
+            self._amp = 0
+        else:
+            try:
+                self._amp = self._vin / self.load
+            except ZeroDivisionError:
+                # Short-circuit on load
+                self._log(f'Load (GUID:{self.guid}) is in short circuit condition', devicebase.LOG_PRIO['CRITICAL'])
+                self._amp = float('inf')
+
+    def poll_values_IEC104(self) -> list:
+        iframes = []
+        if all(x is not None for x in [self._vin, self._amp]):
+            # Input voltage
+            ioa = IOA36(IOA=BASE_IOA, Value=self._vin, QDS=0, CP56Time=devicebase.cp56time())
+            pkt = APDU()
+            pkt /= APCI(ApduLen=25, Type=0x00, Tx=self.tx, Rx=self.rx)
+            pkt /= ASDU(TypeId=36, SQ=0, NumIx=1, CauseTx=3, Test=0, OA=0, Addr=self.guid, IOA=[ioa])
+            self.tx += 1
+            iframes.append(pkt)
+            # Measured current
+            ioa = IOA36(IOA=BASE_IOA + 1, Value=self._amp, QDS=0, CP56Time=devicebase.cp56time())
+            pkt = APDU()
+            pkt /= APCI(ApduLen=25, Type=0x00, Tx=self.tx, Rx=self.rx)
+            pkt /= ASDU(TypeId=36, SQ=0, NumIx=1, CauseTx=3, Test=0, OA=0, Addr=self.guid, IOA=[ioa])
+            self.tx += 1
+            iframes.append(pkt)
+        return iframes
+
+    def handle_IEC104_IFrame(self, packet: APDU) -> APDU:
+        # A load device shouldn't receive any I-Frames
+        assert packet.haslayer('APCI')
+        assert packet.haslayer('ASDU')
+        apci:APCI = packet['APCI']
+        self.tx = apci.Tx + 1
+        self.rx = apci.Rx + 1
+        response:APDU = packet
+        response['APCI'].Rx = self.rx
+        response['APCI'].Tx = self.tx
+        response['ASDU'].CauseTx = 45 # Unknown CoT
         return response

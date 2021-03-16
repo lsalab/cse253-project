@@ -73,6 +73,8 @@ class IEDBase(Thread):
     def __init__(self, guid: int, neighbors_in: list=list(), neighbors_out: list=list(), **kwargs):
         assert all(val is not None for val in [guid, neighbors_in, neighbors_out])
         assert all(isinstance(val, int) for val in neighbors_in + neighbors_out)
+        assert all(val not in neighbors_in for val in neighbors_out)
+        assert all(val not in neighbors_out for val in neighbors_in)
         self._guid = guid
         self._terminate = False
         self._n_in_addr = {n: None for n in neighbors_in}                       # IDs of neighbors this device depends on
