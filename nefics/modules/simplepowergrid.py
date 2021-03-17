@@ -115,15 +115,17 @@ class Transmission(devicebase.IEDBase):
         self._loads = kwargs['loads']
         self._state = kwargs['state']
         self._laststate = None
-        self._load = None
-        self._vin = None
-        self._vout = None
-        self._amp = None
-        self._rload = None
+        self._load:float = None
+        self._vin:float = None
+        self._vout:float = None
+        self._amp:float = None
+        self._rload:float = None
         self._wait_exec = None
     
     def __str__(self) -> str:
-        return f'Vin:  {self._vin:6.3f} V\r\nVout: {self._vout:6.3f} V\r\nI:    {self._amp:6.3f} A\r\nR:    {self._load:6.3f} Ohm\r\nLoad: {self._rload:6.3f} Ohm\r\n'
+        if all(x is not None for x in [self._vin, self._vout, self._amp, self._load, self._rload]):
+            return f'Vin:  {self._vin:6.3f} V\r\nVout: {self._vout:6.3f} V\r\nI:    {self._amp:6.3f} A\r\nBreakers: {self._state:b}\r\nR:    {self._load:6.3f} Ohm\r\nLoad: {self._rload:6.3f} Ohm\r\n'
+        return 'Awaiting data from configured neighbors ...\r\n'
 
     def handle_specific(self, message: simproto.NEFICSMSG):
         if message.SenderID in list(self._n_in_addr.keys()) + list(self._n_out_addr.keys()):
@@ -151,9 +153,10 @@ class Transmission(devicebase.IEDBase):
                         pkt.MessageID = simproto.MESSAGE_ID['MSG_NRDY']
                 elif message.MessageID == simproto.MESSAGE_ID['MSG_TREQ'] and not isinput:
                     self._rload = message.FloatArg0
-                    pkt = None
+                    self._log(f'Received REQ {self._rload:f} from {addr[0]:s}')
+                    return
                 else:
-                    self._log(f'Received a NEFICS message not supported by simplepowergrid.Transmission from {addr}: {repr(message)}')
+                    self._log(f'Received a NEFICS message not supported by simplepowergrid.Transmission from {addr[0]}: {repr(message)}')
                     pkt.MessageID = simproto.MESSAGE_ID['MSG_UKWN']
                 if pkt is not None:
                     self._sock.sendto(pkt.build(), addr)
@@ -190,8 +193,9 @@ class Transmission(devicebase.IEDBase):
                 self._log('All breakers are OPEN', devicebase.LOG_PRIO['WARNING'])
                 self._load = float('inf')
             else:
+                self._load = None
                 for i in range(len(self._loads)):       # Iterate over substation breakers
-                    if (self._state & (2 ** i)) == 0:   # If the current breaker is 'OFF/CLOSED' ==> Corresponding load is connected
+                    if (self._state & (2 ** i)) == 1:   # If the current breaker is 'OFF/CLOSED' ==> Corresponding load is connected
                         if self._loads[i] == 0:         # Failure condition ==> Simulate a broken breaker
                             #TODO: Failure condition
                             self._log(f'Failure condition: short circuit detected on breaker {(BASE_IOA // 10) + 1 +i}', devicebase.LOG_PRIO['CRITICAL'])
@@ -321,7 +325,9 @@ class Load(devicebase.IEDBase):
         self._amp = None
     
     def __str__(self) -> str:
-        return f'Vin:  {self._vin:6.3f} V\r\nR:    {self._load:6.3f} Ohm\r\n'
+        if all(x is not None for x in [self._vin, self._load, self._amp]):
+            return f'Vin:  {self._vin:6.3f} V\r\nI:    {self._amp:6.3f}\r\nR:    {self._load:6.3f} Ohm\r\n'
+        return 'Awaiting data from configured neighbors ...\r\n'
 
     @property
     def load(self) -> float:
@@ -334,7 +340,7 @@ class Load(devicebase.IEDBase):
 
     def handle_specific(self, message: simproto.NEFICSMSG):
         if message.SenderID in self._n_in_addr.keys():
-            addr = self._n_out_addr[message.SenderID]
+            addr = self._n_in_addr[message.SenderID]
             if addr is not None:
                 if message.MessageID == simproto.MESSAGE_ID['MSG_GREQ']:
                     pkt = simproto.NEFICSMSG(
@@ -368,16 +374,17 @@ class Load(devicebase.IEDBase):
             )
             self._sock.sendto(pkt.build(), addr)
             sleep(0.5)
-        if self.load == float('inf'):
-            # Failure condition - Open circuit
-            self._amp = 0
-        else:
-            try:
-                self._amp = self._vin / self.load
-            except ZeroDivisionError:
-                # Short-circuit on load
-                self._log(f'Load (GUID:{self.guid}) is in short circuit condition', devicebase.LOG_PRIO['CRITICAL'])
-                self._amp = float('inf')
+        if all(x is not None for x in [self._load, self._vin]):
+            if self.load == float('inf'):
+                # Failure condition - Open circuit
+                self._amp = 0
+            else:
+                try:
+                    self._amp = self._vin / self.load
+                except ZeroDivisionError:
+                    # Short-circuit on load
+                    self._log(f'Load (GUID:{self.guid}) is in short circuit condition', devicebase.LOG_PRIO['CRITICAL'])
+                    self._amp = float('inf')
 
     def poll_values_IEC104(self) -> list:
         iframes = []
