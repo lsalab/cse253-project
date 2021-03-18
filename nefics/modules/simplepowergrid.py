@@ -195,7 +195,7 @@ class Transmission(devicebase.IEDBase):
             else:
                 self._load = None
                 for i in range(len(self._loads)):       # Iterate over substation breakers
-                    if (self._state & (2 ** i)) == 1:   # If the current breaker is 'OFF/CLOSED' ==> Corresponding load is connected
+                    if (self._state & (2 ** i)) > 0:    # If the current breaker is 'OFF/CLOSED' ==> Corresponding load is connected
                         if self._loads[i] == 0:         # Failure condition ==> Simulate a broken breaker
                             #TODO: Failure condition
                             self._log(f'Failure condition: short circuit detected on breaker {(BASE_IOA // 10) + 1 +i}', devicebase.LOG_PRIO['CRITICAL'])
@@ -214,7 +214,7 @@ class Transmission(devicebase.IEDBase):
             else:
                 self._vout = self._vin * self._rload / (self._rload + self._load)
             try:
-                self._amp = self._vin / self._rload
+                self._amp = (self._vin - self._vout) / self._load
             except ZeroDivisionError:
                 self._log('Short circuit somewhere on the grid', devicebase.LOG_PRIO['CRITICAL'])
                 self._amp = float('inf')                # Failure condition - Short circuit in the system ==> Current increases toward infinity
@@ -240,7 +240,7 @@ class Transmission(devicebase.IEDBase):
             # Breaker status
             for i in range(len(self._loads)):
                 brvalue = 0x01 if (self._state & (2 ** i)) > 0 else 0x02
-                ioa = IOA3(IOA=(BASE_IOA // 10) + i + 1, DIQ=brvalue, flags=0x0)
+                ioa = IOA3(IOA=(BASE_IOA // 10) + i + 1, DIQ=DIQ(DPI=brvalue, flags=0x00))
                 pkt = APDU()
                 pkt /= APCI(ApduLen=14, Type=0x00, Tx=self.tx, Rx=self.rx)
                 pkt /= ASDU(TypeId=3, SQ=0, NumIx=1, CauseTx=3, Test=0, OA=0, Addr=self.guid, IOA=[ioa])
