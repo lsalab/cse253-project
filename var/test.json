@@ -1,0 +1,45 @@
+{
+	"devices": [
+		{
+			"module": "simplepowergrid",
+			"class": "Source",
+			"guid": 1,
+			"in": [],
+			"out": [
+				2
+			],
+			"parameters": {
+				"voltage": 526315.79
+			}
+		},
+		{
+			"module": "simplepowergrid",
+			"class": "Transmission",
+			"guid": 2,
+			"in": [
+				1
+			],
+			"out": [
+				3
+			],
+			"parameters": {
+				"loads": [
+					0.394737,
+					0.394737,
+					0.394737
+				],
+				"state": 7
+			}
+		},
+		{
+			"module": "simplepowergrid",
+			"class": "Load",
+			"guid": 3,
+			"in": [2],
+			"out": [],
+			"parameters": {
+				"load": 12.5
+			}
+		}
+	]
+}

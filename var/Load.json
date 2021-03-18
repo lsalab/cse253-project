@@ -1,0 +1,12 @@
+{
+	"module": "simplepowergrid",
+	"class": "Load",
+	"guid": 3,
+	"in": [
+		2
+	],
+	"out": [],
+	"parameters": {
+		"load": 12.5
+	}
+}
