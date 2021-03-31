@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from struct import unpack
-from scapy.fields import PacketField, LEShortField, ShortField, FlagsField, ByteEnumField, BitEnumField, BitField, XIntField
+from scapy.fields import PacketField, LEShortField, ShortField, FlagsField, ByteEnumField, BitEnumField, BitField, XIntField, LEIntField
 from .fields import IOAID, LEFloatField, ByteField, SignedShortField
 from .const import QDS_FLAGS, SU, DOW_ENUM, SEL_EXEC, DPI_ENUM, DIQ_FLAGS, SIQ_FLAGS, TRANSIENT, QOI_ENUM, R_ENUM, I_ENUM, QU_ENUM, SEL_EXEC, SCS_ENUM
 from scapy.packet import Packet
@@ -142,6 +142,18 @@ class IOA36(Packet):
         PacketField('CP56Time', None, CP56Time),
     ]
 
+class IOA37(Packet):
+    name = 'IOA'
+    fields_desc = [
+        IOAID('IOA', None),
+        LEIntField('Binary_Counter', None),
+        ByteField('SQ', 0),
+        # BitField('CY', 0x00, 1),
+        # BitField('CA', 0x00, 1),
+        # BitField('IV', 0x00, 1),
+        PacketField('CP56Time', None, CP56Time),
+    ]
+
 class IOA45(Packet):
     name = 'IOA'
     fields_desc = [
@@ -179,35 +191,37 @@ class IOA103(Packet):
     ]
 
 IOAS = {
-    36: IOA36,
-    13: IOA13,
-    9: IOA9,
-    50: IOA50,
+    1: IOA1,
     3: IOA3,
     5: IOA5,
+    7: IOA7,
+    9: IOA9,
+    13: IOA13,
+    30: IOA30,
+    31: IOA31,
+    36: IOA36,
+    37: IOA37,
+    45: IOA45,
+    50: IOA50,
+    70: IOA70,
     100: IOA100,
     103: IOA103,
-    30: IOA30,
-    70: IOA70,
-    31: IOA31,
-    1: IOA1,
-    7: IOA7,
-    45: IOA45,
 }
 
 IOALEN = {
-    36: 15,
-    13: 8,
-    9: 6,
-    50: 8,
+    1: 4,
     3: 4,
     5: 5,
+    7: 8,
+    9: 6,
+    13: 8,
+    30: 10,
+    31: 11,
+    36: 15,
+    37: 25,
+    45: 4,
+    50: 8,
+    70: 4,
     100: 4,
     103: 10,
-    30: 10,
-    70: 4,
-    31: 11,
-    1: 4,
-    7: 8,
-    45: 4,
 }

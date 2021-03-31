@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
 from struct import unpack, pack
-from scapy.packet import Raw, bind_layers, Padding, Packet, conf
+from scapy.packet import NoPayload, Raw, bind_layers, Padding, Packet, conf
 from scapy.layers.inet import TCP, IP, Ether
 from scapy.fields import XByteField, ByteField, LEShortField, ShortField, PacketListField, ByteEnumField, PacketField, ConditionalField
 from .ioa import IOAS, IOALEN
 from .const import TYPE_APCI, SQ_ENUM, CAUSE_OF_TX, PN_ENUM, TYPEID_ASDU
 from scapy.all import conf
+from copy import deepcopy
 
 class ASDU(Packet):
 
@@ -116,7 +117,7 @@ class APCI(Packet):
         payl, pad = self.extract_padding(s)
         self.do_dissect_payload(payl)
         if pad and conf.padding:
-            self.add_payload(Padding(pad))
+            self.add_payload(APDU(pad))
 
     def do_build(self):
         s = list(range(6))
@@ -165,10 +166,19 @@ class APDU(Packet):
                 self.add_payload(APDU(pad, _internal=1, _underlayer=self))
             else:
                 self.add_payload(Padding(pad))
-    
+
     def do_dissect(self, s):
         apci = APCI(s, _internal=1, _underlayer=self)
         self.add_payload(apci)
+
+def iterate_apdu(pkt: APDU):
+    while pkt is not None and not isinstance(pkt, NoPayload):
+        apci = deepcopy(pkt['APCI'])
+        apci.payload = NoPayload()
+        asdu = deepcopy(pkt['ASDU'])
+        asdu.payload = NoPayload()
+        pkt = pkt['ASDU'].payload
+        yield APDU()/apci/asdu
 
 bind_layers(TCP, APDU, sport=2404)
 bind_layers(TCP, APDU, dport=2404)

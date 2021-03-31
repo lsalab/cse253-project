@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
-from subprocess import PIPE
+from os import system, environ
+from signal import SIGTERM
+from subprocess import PIPE, Popen
 from mininet.net import Mininet
 from mininet.node import Host
 from mininet.node import OVSKernelSwitch
@@ -8,7 +10,6 @@ from mininet.cli import CLI
 from mininet.log import setLogLevel, info
 from mininet.link import Intf
 from mininet.term import makeTerm
-from os import system
 
 info('*** Initializing ***\n')
 net = Mininet(topo=None, ipBase='10.0.0.0/24', build=False, autoSetMacs=False)
@@ -40,7 +41,10 @@ net.pingAll()
 net.terms += makeTerm(hsrc, cmd='python3 -m nefics.iec104devicelauncher -c ./conf/Source.json')
 net.terms += makeTerm(htx, cmd='python3 -m nefics.iec104devicelauncher -c ./conf/Transmission.json')
 net.terms += makeTerm(hload, cmd='python3 -m nefics.iec104devicelauncher -c ./conf/Load.json')
+localxterm = Popen(['xterm', '-display', environ['DISPLAY']], stdout=PIPE, stdin=PIPE)
 CLI(net)
+localxterm.kill()
+localxterm.wait()
 system('sudo ovs-vsctl del-port s1 veth1')
 system('sudo ip link del veth0')
 net.stop()
