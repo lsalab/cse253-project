@@ -1,0 +1,3 @@
+[submodule "nefics/IEC61850"]
+	path = nefics/IEC61850
+	url = git@github.com:lsalab/iec61850_mms_scapy.git
