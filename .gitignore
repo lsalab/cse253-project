@@ -1,3 +1,6 @@
+# IDE workspace metadata
+.vscode/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -18,7 +21,7 @@ lib/
 lib64/
 parts/
 sdist/
-var/
+#var/
 wheels/
 pip-wheel-metadata/
 share/python-wheels/

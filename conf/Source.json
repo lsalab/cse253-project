@@ -1,0 +1,12 @@
+{
+	"module": "simplepowergrid",
+	"class": "Source",
+	"guid": 1,
+	"in": [],
+	"out": [
+		2
+	],
+	"parameters": {
+		"voltage": 526315.79
+	}
+}

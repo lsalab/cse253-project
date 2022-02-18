@@ -4,18 +4,29 @@ import sys
 from threading import Thread
 import socket
 from time import sleep
-import scapy.all as scapy
-import netifaces as nic
+from prompt_toolkit.shortcuts import run_application
+from PyInquirer.prompts.list import question
+from netifaces import AF_LINK, AF_INET, ifaddresses, interfaces
+from scapy.sendrecv import sr1
+from scapy.layers.l2 import ARP
 import ipaddress
-from IEC104_Raw.dissector import APDU
+
+# NEFICS imports
+from nefics.IEC104.dissector import APDU
 from iec104 import IEC104, get_command
 
 IEC104_PORT = 2404
 
 if __name__ == '__main__':
-    iface = scapy.get_working_if()
-    print('[+] Using ' + iface)
-    address = nic.ifaddresses(iface)[nic.AF_INET][0]
+    iface = run_application(
+        question(
+            'Choose an interface ',
+            choices=[f'{x:s} ({ifaddresses(x)[AF_INET][0]["addr"]:s})' for x in interfaces() if AF_INET in ifaddresses(x)]
+        )
+    )
+    iface = iface.split(' ')[0]
+    print('[+] Using ' + str(iface))
+    address = ifaddresses(iface)[AF_INET][0]
     subnet = ipaddress.ip_network(address['addr'] + '/' + address['netmask'], strict=False)
     nethosts = list(subnet.hosts())
     print('[+] Searching for live hosts in {0:s} ...'.format(str(subnet)))
@@ -26,7 +37,7 @@ if __name__ == '__main__':
         for host in hosts:
             if str(host) != address['addr']:
                 print('[-] Trying {0:s} ...\r'.format(str(host)), end='')
-                response = scapy.sr1(scapy.ARP(op=0x1, psrc=address['addr'], pdst=str(host)), iface=iface, retry=0, timeout=1, verbose=0)
+                response = sr1(ARP(op=0x1, psrc=address['addr'], pdst=str(host)), retry=0, timeout=1, verbose=0)
                 if response is not None and response.haslayer('ARP') and response['ARP'].op == 0x2:
                     print('   [!] {0:s} is alive'.format(str(host)))
                     alive.append(str(host))

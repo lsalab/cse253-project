@@ -1,0 +1,19 @@
+{
+	"module": "simplepowergrid",
+	"class": "Transmission",
+	"guid": 2,
+	"in": [
+		1
+	],
+	"out": [
+		3
+	],
+	"parameters": {
+		"loads": [
+			0.394737,
+			0.394737,
+			0.394737
+		],
+		"state": 7
+	}
+}
