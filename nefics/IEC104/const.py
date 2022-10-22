@@ -156,18 +156,25 @@ I_ENUM = {
 }
 
 QU_ENUM = {
-    0x00: 'no pulse defined',
-    0x01: 'short pulse duration (circuit-breaker)',
+    0x00: 'no additional definition',
+    0x01: 'short pulse duration',
     0x02: 'long pulse duration',
-    0x03: 'persistent output',
-    0x04: 'reserved',
-    0x05: 'reserved',
-    0x06: 'reserved',
+    0x03: 'persistent output'
 }
+
+for i in range(0x04,0x20):
+    QU_ENUM[i] = 'reserved'
 
 SCS_ENUM = {
     0x00: 'OFF',
     0x01: 'ON'
+}
+
+DCS_ENUM = {
+    0x00: 'not permitted',
+    0x01: 'OFF',
+    0x02: 'ON',
+    0x03: 'not permitted'
 }
 
 PN_ENUM = {

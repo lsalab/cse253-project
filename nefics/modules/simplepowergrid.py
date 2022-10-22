@@ -15,7 +15,13 @@ and an output neighbor, to which the output voltage is supplied..
 The consumer load has one transmission substation as its input.
 '''
 
+import signal
+from socket import AF_INET, IPPROTO_TCP, SOCK_STREAM, socket, timeout
+import sys
+from threading import Thread
 from time import sleep
+from types import FrameType
+from Crypto.Random.random import randint
 
 # NEFICS imports
 from nefics.IEC104.dissector import *
@@ -24,6 +30,149 @@ import nefics.modules.devicebase as devicebase
 import nefics.simproto as simproto
 
 BASE_IOA = 1001
+
+IEC104_T1 = 15
+IEC104_PORT = 2404
+IEC104_BUFFER_SIZE = 65536 # 64K
+
+class IEC104DeviceHandler(Thread):
+
+    def __init__(self, device: devicebase.IEDBase):
+        super().__init__()
+        self._terminate = False
+        self._device = device
+        self._connections = []
+        self._data_transfer_status = {}
+    
+    def __str__(self) -> str:
+        iecstr = f'### IEC-104 Simulated device\r\n'
+        iecstr += f' ## Class: {self._device.__class__.__name__}\r\n'
+        iecstr += f'  # Status at: {datetime.now().ctime()}\r\n'
+        iecstr += f'----------------------------\r\n'
+        iecstr += str(self._device)
+        iecstr += f'----------------------------'
+        return iecstr
+
+    @property
+    def terminate(self) -> bool:
+        return self._terminate
+    
+    @terminate.setter
+    def terminate(self, value: bool):
+        self._terminate = value
+    
+    def set_terminate(self, signum: int, stack_frame: FrameType):
+        if signum in [signal.SIGINT, signal.SIGTERM]:
+            self._device.terminate = True
+            self._terminate = True
+            sys.stderr.write(f'Received a termination signal. Terminating threads ...\r\n')
+            sys.stderr.flush()
+        else:
+            sys.stderr.write(f'Signal handler recevied an unsupported signal: {signum}\r\n')
+            sys.stderr.flush()
+    
+    def status(self):
+        stat = '\r\n\r\n'
+        stat += str(self)
+        print(stat)
+
+    def _data_transfer(self, isock:socket, connid: int):
+        '''
+        This method is meant to be executed within a thread. It handles the
+        data transfer loop of the simulated device. Each iteration requests
+        the values to be sent, and sends one value each second while in a
+        STARTED connection.
+        '''
+        while self._data_transfer_status[connid] and not self._terminate:
+            values = self._device.poll_values_IEC104()
+            for apdu in values:
+                isock.send(apdu.build())
+                sleep(1)
+
+    def _connection_loop(self, isock: socket):
+        connection_id = randint(0, 65535)
+        while connection_id in self._data_transfer_status.keys():
+            connection_id = randint(0, 65535)
+        datatransfer:Thread = None
+        self._data_transfer_status[connection_id] = False
+        keepconn = True
+        while keepconn and not self._terminate:
+            try:
+                data = isock.recv(IEC104_BUFFER_SIZE)
+                if len(data) > 0:
+                    data = APDU(data)
+                    frame_type = data['APCI'].Type
+                    if datatransfer is None:
+                        # STOPPED connection
+                        if frame_type in [0x00, 0x01]:
+                            # I-Frame (0x00) OR S-Frame (0x01)
+                            keepconn = False
+                        else:
+                            # U-Frame (0x03)
+                            confirmation = APDU()/APCI(
+                                ApduLen=4,
+                                Type=0x03,
+                                UType=data['APCI'].UType << 1
+                            )
+                            isock.send(confirmation.build())
+                            if data['APCI'].UType == 0x01:
+                                # STARTDT
+                                self._data_transfer_status[connection_id] = True
+                                datatransfer = Thread(target=self._data_transfer, args=[isock, connection_id])
+                                datatransfer.start()
+                    else:
+                        # STARTED connection
+                        if frame_type == 0x00:
+                            # I-Frame
+                            apdu = self._device.handle_IEC104_IFrame(data)
+                        elif frame_type == 0x01:
+                            # S-Frame
+                            self._device.tx = data['APCI'].Rx
+                            apdu = None
+                        else:
+                            # U-Frame
+                            apdu = APDU()/APCI(
+                                ApduLen=4,
+                                Type=0x03,
+                                UType=data['APCI'].UType << 1
+                            )
+                            if data['APCI'].UType == 0x04:
+                                # STOPDT
+                                self._data_transfer_status[connection_id] = False
+                                datatransfer.join()
+                                # This join() is essentially the UNCONFIRMED STOPPED connection state
+                                # the difference is that no incoming frames are received until the remaining
+                                # data values are transferred to the controller.
+                                datatransfer = None
+                        if apdu is not None:
+                            isock.send(apdu.build())
+            except (timeout, BrokenPipeError) as ex:
+                keepconn = False
+        if datatransfer is not None:
+            self._data_transfer_status[connection_id] = False
+            datatransfer.join()
+        isock.close()
+
+    def run(self):
+        listening_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        listening_sock.bind(('', IEC104_PORT))
+        listening_sock.settimeout(2)
+        listening_sock.listen()
+        self._device.start()
+        while not self._terminate:
+            try:
+                incoming, iaddr = listening_sock.accept()
+                incoming.settimeout(IEC104_T1)
+                new_conn = Thread(target=self._connection_loop, args=[incoming])
+                self._connections.append(new_conn)
+                new_conn.start()
+            except timeout:
+                continue
+        while any(thr.is_alive() for thr in self._connections):
+            for thr in self._connections:
+                thr.join(1)
+        self._device.join()
+        listening_sock.close()
 
 class Source(devicebase.IEDBase):
     '''
